@@ -2,17 +2,22 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#0a0f1d" />
-    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- CSP PERMISIVO PARA WEBGL / THREE.JS SHADERS -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval';" />
+    
+    <title>CJ PROM '07 STRIKERS</title>
+    
+    <!-- Tipografía Chakra Petch -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&display=swap" rel="stylesheet">
-    <title>CJ PROM '07 STRIKERS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700;800&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-slate-900 text-white overflow-hidden select-none touch-none" style="margin: 0; padding: 0; background-color: #0a0f1d;">
+  <body style="margin: 0; padding: 0; background-color: #060913; overflow: hidden;">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
