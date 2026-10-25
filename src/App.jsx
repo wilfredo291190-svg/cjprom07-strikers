@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ROSTER_PROM07 } from './data/roster';
 import GameCanvas from './components/GameCanvas';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
@@ -7,8 +7,26 @@ export default function App() {
   const [roster, setRoster] = useState(ROSTER_PROM07);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Función para gastar Skill Points (SP) en estadísticas
+  // Pantalla de Carga al Entrar / Re-entrar
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 1500);
+
+    // Resetear partida si el usuario minimiza y vuelve a abrir desde el Home
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsPlaying(false);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   const upgradeStat = (playerNumber, statKey) => {
     setRoster(prevRoster => prevRoster.map(player => {
       if (player.number === playerNumber && player.skillPoints > 0 && player[statKey] < 99) {
@@ -30,23 +48,6 @@ export default function App() {
     }
   };
 
-  // Otorgar EXP de prueba para probar el menú de mejoras
-  const giveTestExp = (playerNumber) => {
-    setRoster(prevRoster => prevRoster.map(player => {
-      if (player.number === playerNumber) {
-        const updated = {
-          ...player,
-          level: player.level + 1,
-          skillPoints: player.skillPoints + 3
-        };
-        setSelectedPlayer(updated);
-        return updated;
-      }
-      return player;
-    }));
-  };
-
-  // Al terminar la partida, suma EXP y calcula Skill Points ganados
   const handleGameOver = (expGained) => {
     if (selectedPlayer && expGained > 0) {
       setRoster(prevRoster => prevRoster.map(player => {
@@ -59,7 +60,7 @@ export default function App() {
             ...player,
             exp: newExp,
             level: newLevel,
-            skillPoints: player.skillPoints + addedSp + (expGained >= 500 ? 3 : 0)
+            skillPoints: player.skillPoints + addedSp
           };
           setSelectedPlayer(updated);
           return updated;
@@ -69,6 +70,34 @@ export default function App() {
     }
     setIsPlaying(false);
   };
+
+  // Pantalla de Carga (Loading Screen)
+  if (isLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#0a0f1d',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#eab308',
+        fontFamily: "'Chakra Petch', sans-serif"
+      }}>
+        <h1 style={{ fontSize: '22px', margin: '0 0 8px 0', letterSpacing: '2px' }}>CJ PROM '07 STRIKERS</h1>
+        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '20px' }}>CARGANDO DATOS...</div>
+        <div style={{
+          width: '40px',
+          height: '40px',
+          border: '3px solid #1e293b',
+          borderTop: '3px solid #eab308',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite'
+        }} />
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -81,6 +110,31 @@ export default function App() {
       touchAction: 'none',
       userSelect: 'none'
     }}>
+      {/* Advertencia Landscape en Mobile */}
+      <div className="landscape-warning" style={{
+        display: 'none',
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: '#0a0f1d',
+        zIndex: 9999999,
+        color: '#eab308',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        padding: '20px'
+      }}>
+        <div style={{ fontSize: '32px', marginBottom: '10px' }}>📱</div>
+        <div style={{ fontSize: '14px', fontWeight: 'bold' }}>POR FAVOR GIRA TU CELULAR</div>
+        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>Este juego está optimizado en formato vertical</div>
+      </div>
+
+      <style>{`
+        @media (orientation: landscape) and (max-height: 500px) {
+          .landscape-warning { display: flex !important; }
+        }
+      `}</style>
+
       <PWAInstallPrompt />
 
       {isPlaying ? (
@@ -214,31 +268,11 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Botón de Test para agregar SP directamente */}
-              <button
-                onClick={() => giveTestExp(selectedPlayer.number)}
-                style={{
-                  width: '100%',
-                  backgroundColor: '#1e293b',
-                  color: '#22c55e',
-                  border: '1px solid #22c55e',
-                  borderRadius: '4px',
-                  padding: '6px',
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  marginBottom: '12px',
-                  cursor: 'pointer'
-                }}
-              >
-                ⚡ DAR +3 SKILL POINTS (TEST DE MEJORAS)
-              </button>
-
               <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>
                 MEJORAR ATRIBUTOS
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Potencia */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>POTENCIA</span>
@@ -259,7 +293,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Rosca */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>ROSCA / CURVA</span>
@@ -280,7 +313,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Puntería */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>PUNTERÍA</span>
