@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBfjqq-9M3Xr6SolwWJmPWFzNMTD3_kryU",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: "cj-prom07-strikers.firebaseapp.com",
   projectId: "cj-prom07-strikers",
   storageBucket: "cj-prom07-strikers.firebasestorage.app",
