@@ -1,330 +1,462 @@
-import React, { useState } from 'react';
-import { ROSTER_PROM07 } from './data/roster';
-import GameCanvas from './components/GameCanvas';
-import PWAInstallPrompt from './components/PWAInstallPrompt';
+import React, { useEffect, useRef, useState } from 'react';
+import Phaser from 'phaser';
 
-export default function App() {
-  const [roster, setRoster] = useState(ROSTER_PROM07);
-  const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+export default function GameCanvas({ player, onExit }) {
+  const gameRef = useRef(null);
 
-  // Función para gastar Skill Points (SP) en estadísticas
-  const upgradeStat = (playerNumber, statKey) => {
-    setRoster(prevRoster => prevRoster.map(player => {
-      if (player.number === playerNumber && player.skillPoints > 0 && player[statKey] < 99) {
-        return {
-          ...player,
-          [statKey]: player[statKey] + 1,
-          skillPoints: player.skillPoints - 1
-        };
+  const [score, setScore] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [lives, setLives] = useState(3);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [feedback, setFeedback] = useState('');
+  const [gameOverData, setGameOverData] = useState(null);
+
+  useEffect(() => {
+    const config = {
+      type: Phaser.AUTO,
+      parent: 'phaser-game-container',
+      width: window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: '#0a0f1d',
+      scene: {
+        create: createScene,
+        update: updateScene
       }
-      return player;
-    }));
+    };
 
-    if (selectedPlayer && selectedPlayer.number === playerNumber) {
-      setSelectedPlayer(prev => ({
-        ...prev,
-        [statKey]: prev[statKey] + 1,
-        skillPoints: prev.skillPoints - 1
-      }));
-    }
-  };
+    const game = new Phaser.Game(config);
+    gameRef.current = game;
 
-  // Otorgar EXP de prueba para probar el menú de mejoras
-  const giveTestExp = (playerNumber) => {
-    setRoster(prevRoster => prevRoster.map(player => {
-      if (player.number === playerNumber) {
-        const updated = {
-          ...player,
-          level: player.level + 1,
-          skillPoints: player.skillPoints + 3
-        };
-        setSelectedPlayer(updated);
-        return updated;
+    let ball, ballShadow, keeper, keeperBody;
+    let goalX, goalY, goalWidth, goalHeight;
+    let wallGroup = [];
+    let trailGraphics;
+
+    let currentScore = 0;
+    let currentLives = 3;
+    let currentLevel = 1;
+    let totalGoals = 0;
+    let currentTime = 60;
+    let timerEvent;
+
+    let startX, startY, startTime;
+    let isShooting = false;
+    let isGameOver = false;
+
+    function createScene() {
+      const scene = this;
+      const width = scene.cameras.main.width;
+      const height = scene.cameras.main.height;
+
+      // CAMPO Y PERSPECTIVA
+      const bg = scene.add.graphics();
+      bg.fillStyle(0x0f172a, 1);
+      bg.fillRect(0, 0, width, height * 0.25);
+
+      const stripeHeight = (height * 0.75) / 6;
+      for (let i = 0; i < 6; i++) {
+        bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
+        bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
-      return player;
-    }));
-  };
 
-  // Al terminar la partida, suma EXP y calcula Skill Points ganados
-  const handleGameOver = (expGained) => {
-    if (selectedPlayer && expGained > 0) {
-      setRoster(prevRoster => prevRoster.map(player => {
-        if (player.number === selectedPlayer.number) {
-          const newExp = (player.exp || 0) + expGained;
-          const newLevel = 1 + Math.floor(newExp / 300);
-          const addedSp = newLevel > player.level ? (newLevel - player.level) * 2 : 0;
+      // PORTERÍA
+      goalWidth = Math.min(width * 0.72, 320);
+      goalHeight = 90;
+      goalX = (width - goalWidth) / 2;
+      goalY = height * 0.22;
 
-          const updated = {
-            ...player,
-            exp: newExp,
-            level: newLevel,
-            skillPoints: player.skillPoints + addedSp + (expGained >= 500 ? 3 : 0)
-          };
-          setSelectedPlayer(updated);
-          return updated;
+      const net = scene.add.graphics();
+      net.lineStyle(1, 0xffffff, 0.25);
+      for (let x = goalX; x <= goalX + goalWidth; x += 12) {
+        net.lineBetween(x, goalY, x, goalY + goalHeight);
+      }
+      for (let y = goalY; y <= goalY + goalHeight; y += 12) {
+        net.lineBetween(goalX, y, goalX + goalWidth, y);
+      }
+
+      const posts = scene.add.graphics();
+      posts.lineStyle(6, 0xffffff, 1);
+      posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
+
+      // PORTERO ORSINI (#94)
+      keeper = scene.add.container(width / 2, goalY + goalHeight - 15);
+      keeperBody = scene.add.rectangle(0, -12, 16, 28, 0xeab308);
+      const keeperHead = scene.add.circle(0, -26, 6, 0xfbd23c);
+      keeper.add([keeperBody, keeperHead]);
+
+      // BALÓN Y SOMBRA
+      const startXPos = width / 2;
+      const startYPos = height - 110;
+
+      ballShadow = scene.add.ellipse(startXPos, startYPos + 12, 24, 8, 0x000000, 0.4);
+
+      ball = scene.add.container(startXPos, startYPos);
+      const ballBase = scene.add.circle(0, 0, 14, 0xffffff);
+      const ballPattern = scene.add.circle(0, 0, 10, 0x0f172a);
+      const ballInner = scene.add.circle(0, 0, 6, 0xffffff);
+      ball.add([ballBase, ballPattern, ballInner]);
+
+      trailGraphics = scene.add.graphics();
+
+      spawnWall(scene, currentLevel, width, height);
+
+      // RELOJ FIJO DE 60 SEGUNDOS
+      timerEvent = scene.time.addEvent({
+        delay: 1000,
+        callback: () => {
+          if (isGameOver) return;
+          currentTime -= 1;
+          setTimeLeft(currentTime);
+
+          if (currentTime <= 0) {
+            triggerGameOver('¡TIEMPO AGOTADO!');
+          }
+        },
+        callbackScope: scene,
+        loop: true
+      });
+
+      // CONTROLES DE TIRO BASADOS EN SWIPE
+      scene.input.on('pointerdown', (pointer) => {
+        if (isShooting || isGameOver) return;
+        startX = pointer.x;
+        startY = pointer.y;
+        startTime = pointer.time;
+      });
+
+      scene.input.on('pointerup', (pointer) => {
+        if (isShooting || isGameOver || !startX) return;
+
+        const duration = Math.max(80, pointer.time - startTime);
+        const deltaX = pointer.x - startX;
+        const deltaY = pointer.y - startY;
+
+        if (deltaY < -20) {
+          isShooting = true;
+
+          // 1. Calibración de Potencia/Velocidad (Suave y Progresiva)
+          const powerStat = player ? player.power : 20;
+          const swipeVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / duration;
+          const shotSpeed = Phaser.Math.Clamp(650 - (swipeVelocity * 80) - (powerStat * 2), 350, 600);
+
+          // 2. Calibración de Curva y Altura
+          const curveStat = player ? player.curve : 20;
+          const controlX = ball.x + (deltaX * (0.8 + curveStat / 60));
+          const controlY = height * 0.48;
+          const targetX = Phaser.Math.Clamp(ball.x + deltaX * 1.05, goalX - 15, goalX + goalWidth + 15);
+          
+          // Altura dependiente de la longitud del swipe
+          const heightFactor = Phaser.Math.Clamp(Math.abs(deltaY) / 250, 0.2, 0.9);
+          const targetY = goalY + goalHeight - (goalHeight * heightFactor);
+
+          // 3. IA de Orsini Adaptativa (Fallible en esquinas)
+          const isCornerShot = (targetX < goalX + 40 || targetX > goalX + goalWidth - 40);
+          const keeperReactDelay = isCornerShot ? 0.35 : 0.6;
+          const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 20, goalX + goalWidth - 20);
+
+          scene.tweens.add({
+            targets: keeper,
+            x: keeperTargetX,
+            duration: shotSpeed / keeperReactDelay,
+            ease: 'Power1.out'
+          });
+
+          // Trayectoria
+          let progress = 0;
+          let hasCollided = false;
+
+          scene.tweens.add({
+            targets: { t: 0 },
+            t: 1,
+            duration: shotSpeed,
+            ease: 'Power1.out',
+            onUpdate: (tween, target) => {
+              if (hasCollided) return;
+
+              progress = target.t;
+              const px = Phaser.Math.Interpolation.QuadraticBezier(progress, startXPos, controlX, targetX);
+              const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, targetY);
+
+              ball.setPosition(px, py);
+              ball.setScale(1 - progress * 0.55);
+              ballShadow.setPosition(px, py + 12 * (1 - progress));
+              ballShadow.setScale(1 - progress * 0.55);
+
+              trailGraphics.clear();
+              trailGraphics.lineStyle(3, 0xeab308, 0.6);
+              trailGraphics.lineBetween(startXPos, startYPos, px, py);
+
+              // COLISIÓN BARRERA
+              wallGroup.forEach(d => {
+                if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
+                  hasCollided = true;
+                  tween.stop();
+                  trailGraphics.clear();
+                  handleCollision(scene, '¡EN LA BARRERA!');
+                }
+              });
+
+              // COLISIÓN ORSINI (Hitbox justo)
+              if (!hasCollided && Math.abs(px - keeper.x) < 14 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
+                hasCollided = true;
+                tween.stop();
+                trailGraphics.clear();
+                handleCollision(scene, '¡ATAJÓ ORSINI!');
+              }
+            },
+            onComplete: () => {
+              if (!hasCollided) {
+                trailGraphics.clear();
+                evaluateShot(scene, targetX, targetY, width, height);
+              }
+            }
+          });
         }
-        return player;
-      }));
+      });
     }
-    setIsPlaying(false);
-  };
+
+    function updateScene() {
+      if (currentLevel >= 4 && wallGroup.length > 0 && !isGameOver) {
+        wallGroup.forEach(defender => {
+          defender.x += Math.sin(this.time.now / 300) * 1.2;
+        });
+      }
+    }
+
+    function spawnWall(scene, levelNum, width, height) {
+      wallGroup.forEach(d => d.destroy());
+      wallGroup = [];
+
+      if (levelNum === 1) return;
+
+      const numDefenders = levelNum === 2 ? 2 : levelNum === 3 ? 3 : 4;
+      const wallY = height * 0.52;
+      const startWallX = width / 2 - ((numDefenders - 1) * 22) / 2;
+
+      for (let i = 0; i < numDefenders; i++) {
+        const defender = scene.add.container(startWallX + i * 22, wallY);
+        const body = scene.add.rectangle(0, 0, 16, 36, 0x1e293b);
+        const shirtBorder = scene.add.rectangle(0, -10, 16, 4, 0xeab308);
+        const head = scene.add.circle(0, -22, 7, 0xfbd23c);
+
+        defender.add([body, shirtBorder, head]);
+        wallGroup.push(defender);
+      }
+    }
+
+    function handleCollision(scene, msg) {
+      currentLives -= 1;
+      setLives(currentLives);
+      triggerFeedback(msg);
+
+      if (currentLives <= 0) {
+        triggerGameOver('¡SIN VIDAS!');
+      } else {
+        resetBall(scene);
+      }
+    }
+
+    function evaluateShot(scene, targetX, targetY, width, height) {
+      const inGoalX = targetX >= goalX && targetX <= goalX + goalWidth;
+      const inGoalY = targetY >= goalY && targetY <= goalY + goalHeight;
+
+      if (!inGoalX || !inGoalY) {
+        handleCollision(scene, '¡FUERA!');
+      } else {
+        totalGoals += 1;
+        const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && targetY < goalY + 30;
+        const pts = isCorner ? 250 : 100;
+        currentScore += pts;
+        setScore(currentScore);
+
+        triggerFeedback(isCorner ? '¡ESCUADRA!' : '¡GOOOL!');
+
+        const newLvl = Math.min(5, 1 + Math.floor(totalGoals / 2));
+        if (newLvl !== currentLevel) {
+          currentLevel = newLvl;
+          setLevel(currentLevel);
+          spawnWall(scene, currentLevel, width, height);
+        }
+
+        resetBall(scene);
+      }
+    }
+
+    function resetBall(scene) {
+      const width = scene.cameras.main.width;
+      const height = scene.cameras.main.height;
+
+      scene.time.delayedCall(700, () => {
+        if (isGameOver) return;
+        ball.setPosition(width / 2, height - 110);
+        ball.setScale(1);
+        ballShadow.setPosition(width / 2, height - 98);
+        ballShadow.setScale(1);
+        keeper.setPosition(width / 2, goalY + goalHeight - 15);
+        isShooting = false;
+      });
+    }
+
+    function triggerFeedback(text) {
+      setFeedback(text);
+      setTimeout(() => setFeedback(''), 900);
+    }
+
+    function triggerGameOver(reason) {
+      isGameOver = true;
+      if (timerEvent) timerEvent.remove();
+
+      const expGained = Math.floor(currentScore / 10);
+      setGameOverData({ reason, score: currentScore, totalGoals, expGained });
+    }
+
+    return () => {
+      if (gameRef.current) {
+        gameRef.current.destroy(true);
+      }
+    };
+  }, [player]);
 
   return (
     <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#0a0f1d',
-      color: '#f8fafc',
-      fontFamily: "'Chakra Petch', sans-serif",
-      padding: isPlaying ? '0' : '12px 16px',
-      boxSizing: 'border-box',
+      position: 'relative',
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden',
       touchAction: 'none',
-      userSelect: 'none'
+      userSelect: 'none',
+      fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      <PWAInstallPrompt />
+      {/* HUD SUPERIOR GARANTIZADO */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        padding: '12px 16px',
+        display: 'flex',
+        justify: 'space-between',
+        alignItems: 'center',
+        zIndex: 50,
+        backgroundColor: 'rgba(10, 15, 29, 0.90)',
+        borderBottom: '1px solid #eab308'
+      }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
+          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#3b82f6' }}>NIVEL: {level}</div>
+        </div>
 
-      {isPlaying ? (
-        <GameCanvas 
-          player={selectedPlayer} 
-          onExit={handleGameOver} 
-        />
-      ) : (
-        <>
-          <header style={{
+        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ef4444' }}>
+          00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#ef4444' }}>
+          {'❤️'.repeat(Math.max(0, lives))}
+        </div>
+
+        <button
+          onClick={() => onExit(0)}
+          style={{
+            backgroundColor: '#1e293b',
+            color: '#eab308',
+            border: '1px solid #eab308',
+            borderRadius: '4px',
+            padding: '4px 8px',
+            fontSize: '9px',
+            fontWeight: '700'
+          }}
+        >
+          SALIR
+        </button>
+      </div>
+
+      {/* FEEDBACK CENTRAL */}
+      {feedback && (
+        <div style={{
+          position: 'absolute',
+          top: '40%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          fontSize: '22px',
+          fontWeight: 'bold',
+          color: '#eab308',
+          zIndex: 60,
+          textShadow: '0 2px 8px rgba(0,0,0,0.9)',
+          backgroundColor: 'rgba(17, 24, 39, 0.9)',
+          padding: '6px 16px',
+          borderRadius: '8px',
+          border: '1px solid #eab308'
+        }}>
+          {feedback}
+        </div>
+      )}
+
+      {/* CANVAS */}
+      <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
+
+      {/* GAMEOVER MODAL */}
+      {gameOverData && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundColor: 'rgba(10, 15, 29, 0.96)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          zIndex: 100
+        }}>
+          <h2 style={{ fontSize: '24px', color: '#ef4444', margin: '0 0 12px 0', textTransform: 'uppercase' }}>
+            {gameOverData.reason}
+          </h2>
+
+          <div style={{
+            backgroundColor: '#111827',
+            border: '1px solid #eab308',
+            borderRadius: '10px',
+            padding: '16px',
+            width: '100%',
+            maxWidth: '280px',
             textAlign: 'center',
-            marginBottom: '16px',
-            borderBottom: '1px solid #eab308',
-            paddingBottom: '8px'
+            marginBottom: '20px'
           }}>
-            <h1 style={{
-              fontSize: '18px',
+            <div style={{ fontSize: '11px', color: '#94a3b8' }}>PUNTAJE FINAL</div>
+            <div style={{ fontSize: '26px', fontWeight: 'bold', color: '#eab308', margin: '4px 0 12px 0' }}>
+              {gameOverData.score}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderTop: '1px solid #1e293b', paddingTop: '8px', marginBottom: '8px' }}>
+              <span>Goles Totales:</span>
+              <strong>{gameOverData.totalGoals}</strong>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#22c55e' }}>
+              <span>EXP Ganada:</span>
+              <strong>+{gameOverData.expGained} PTS</strong>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onExit(gameOverData.expGained)}
+            style={{
+              width: '100%',
+              maxWidth: '280px',
+              backgroundColor: '#eab308',
+              color: '#0a0f1d',
               fontWeight: '700',
-              color: '#eab308',
-              margin: 0,
-              letterSpacing: '1px',
-              textTransform: 'uppercase'
-            }}>
-              CJ PROM '07 STRIKERS
-            </h1>
-            <p style={{ fontSize: '10px', color: '#64748b', margin: '2px 0 0 0', textTransform: 'uppercase' }}>
-              Nadie es más fuerte que todos juntos
-            </p>
-          </header>
-
-          {!selectedPlayer ? (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase' }}>
-                  Plantel Oficial
-                </span>
-                <span style={{ fontSize: '10px', backgroundColor: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#eab308' }}>
-                  {roster.length} Jugadores
-                </span>
-              </div>
-
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: '8px'
-              }}>
-                {roster.map((player) => (
-                  <div
-                    key={player.number}
-                    onClick={() => setSelectedPlayer(player)}
-                    style={{
-                      backgroundColor: '#111827',
-                      border: '1px solid #1e293b',
-                      borderRadius: '6px',
-                      padding: '8px 4px',
-                      textAlign: 'center',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#eab308' }}>#{player.number}</div>
-                    <div style={{ fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {player.name}
-                    </div>
-                    <div style={{ fontSize: '9px', color: '#64748b', fontWeight: '500' }}>{player.pos}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div style={{
-              maxWidth: '360px',
-              margin: '0 auto',
-              backgroundColor: '#111827',
-              borderRadius: '10px',
-              padding: '16px',
-              border: '1px solid #eab308'
-            }}>
-              <button
-                onClick={() => setSelectedPlayer(null)}
-                style={{
-                  backgroundColor: '#1e293b',
-                  color: '#eab308',
-                  border: '1px solid #334155',
-                  borderRadius: '6px',
-                  padding: '6px 12px',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  marginBottom: '12px'
-                }}
-              >
-                ← VOLVER AL ROSTER
-              </button>
-
-              <div style={{ textAlign: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '28px', fontWeight: '700', color: '#eab308', lineHeight: 1 }}>
-                  #{selectedPlayer.number}
-                </span>
-                <h2 style={{ fontSize: '18px', margin: '2px 0 4px 0', textTransform: 'uppercase' }}>
-                  {selectedPlayer.name}
-                </h2>
-                <span style={{
-                  backgroundColor: '#1e293b',
-                  color: '#94a3b8',
-                  padding: '2px 6px',
-                  borderRadius: '3px',
-                  fontSize: '10px',
-                  fontWeight: '700'
-                }}>
-                  {selectedPlayer.pos}
-                </span>
-              </div>
-
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '8px',
-                backgroundColor: '#0a0f1d',
-                padding: '8px',
-                borderRadius: '6px',
-                marginBottom: '12px',
-                border: '1px solid #1e293b'
-              }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '9px', color: '#64748b' }}>NIVEL</div>
-                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#eab308' }}>{selectedPlayer.level}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '9px', color: '#64748b' }}>SKILL POINTS</div>
-                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e' }}>{selectedPlayer.skillPoints} SP</div>
-                </div>
-              </div>
-
-              {/* Botón de Test para agregar SP directamente */}
-              <button
-                onClick={() => giveTestExp(selectedPlayer.number)}
-                style={{
-                  width: '100%',
-                  backgroundColor: '#1e293b',
-                  color: '#22c55e',
-                  border: '1px solid #22c55e',
-                  borderRadius: '4px',
-                  padding: '6px',
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  marginBottom: '12px',
-                  cursor: 'pointer'
-                }}
-              >
-                ⚡ DAR +3 SKILL POINTS (TEST DE MEJORAS)
-              </button>
-
-              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>
-                MEJORAR ATRIBUTOS
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Potencia */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
-                    <span>POTENCIA</span>
-                    <span style={{ color: '#eab308' }}>{selectedPlayer.power} / 99</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
-                      <div style={{ width: `${selectedPlayer.power}%`, backgroundColor: '#eab308', height: '100%', borderRadius: '3px' }}></div>
-                    </div>
-                    {selectedPlayer.skillPoints > 0 && (
-                      <button
-                        onClick={() => upgradeStat(selectedPlayer.number, 'power')}
-                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
-                      >
-                        +1
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Rosca */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
-                    <span>ROSCA / CURVA</span>
-                    <span style={{ color: '#3b82f6' }}>{selectedPlayer.curve} / 99</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
-                      <div style={{ width: `${selectedPlayer.curve}%`, backgroundColor: '#3b82f6', height: '100%', borderRadius: '3px' }}></div>
-                    </div>
-                    {selectedPlayer.skillPoints > 0 && (
-                      <button
-                        onClick={() => upgradeStat(selectedPlayer.number, 'curve')}
-                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
-                      >
-                        +1
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Puntería */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
-                    <span>PUNTERÍA</span>
-                    <span style={{ color: '#22c55e' }}>{selectedPlayer.accuracy} / 99</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
-                      <div style={{ width: `${selectedPlayer.accuracy}%`, backgroundColor: '#22c55e', height: '100%', borderRadius: '3px' }}></div>
-                    </div>
-                    {selectedPlayer.skillPoints > 0 && (
-                      <button
-                        onClick={() => upgradeStat(selectedPlayer.number, 'accuracy')}
-                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
-                      >
-                        +1
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setIsPlaying(true)}
-                style={{
-                  width: '100%',
-                  marginTop: '16px',
-                  backgroundColor: '#eab308',
-                  color: '#0a0f1d',
-                  fontWeight: '700',
-                  fontFamily: "'Chakra Petch', sans-serif",
-                  border: 'none',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  letterSpacing: '1px',
-                  textTransform: 'uppercase'
-                }}
-              >
-                ENTRAR A LA CANCHA
-              </button>
-            </div>
-          )}
-        </>
+              fontFamily: "'Chakra Petch', sans-serif",
+              border: 'none',
+              padding: '12px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              textTransform: 'uppercase',
+              cursor: 'pointer'
+            }}
+          >
+            GUARDAR Y MEJORAR JUGADOR
+          </button>
+        </div>
       )}
     </div>
   );
