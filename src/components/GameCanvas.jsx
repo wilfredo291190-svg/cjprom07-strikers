@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
+import { sfx } from '../utils/audio';
 
 export default function GameCanvas({ player, onExit }) {
   const gameRef = useRef(null);
@@ -53,50 +54,73 @@ export default function GameCanvas({ player, onExit }) {
       const width = scene.cameras.main.width;
       const height = scene.cameras.main.height;
 
-      // CAMPO
+      // Silbato de Inicio
+      sfx.playWhistle();
+
+      // 1. ILUSTRACIÓN DEL CAMPO Y ESTADIO NOCTURNO
       const bg = scene.add.graphics();
       bg.fillStyle(0x0f172a, 1);
       bg.fillRect(0, 0, width, height * 0.25);
 
+      // Reflectores de Estadio (Luz)
+      bg.fillStyle(0xfde047, 0.15);
+      bg.fillTriangle(0, 0, width * 0.4, height * 0.25, 0, height * 0.25);
+      bg.fillTriangle(width, 0, width * 0.6, height * 0.25, width, height * 0.25);
+
+      // Césped con Degradado y Franjas
       const stripeHeight = (height * 0.75) / 6;
       for (let i = 0; i < 6; i++) {
         bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
         bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
 
-      // PORTERÍA
+      // Líneas de Campo en Perspectiva
+      bg.lineStyle(2, 0xffffff, 0.4);
+      bg.strokeLineShape(new Phaser.Geom.Line(width * 0.1, height * 0.4, width * 0.9, height * 0.4));
+
+      // 2. PORTERÍA 2.5D
       goalWidth = Math.min(width * 0.75, 320);
       goalHeight = 90;
       goalX = (width - goalWidth) / 2;
-      goalY = height * 0.25; // Bajado ligeramente para despejar el HUD
+      goalY = height * 0.25;
 
       targetAimX = width / 2;
       targetAimY = goalY + goalHeight / 2;
 
+      // Red Detallada
       const net = scene.add.graphics();
-      net.lineStyle(1, 0xffffff, 0.25);
-      for (let x = goalX; x <= goalX + goalWidth; x += 12) {
+      net.lineStyle(1, 0xe2e8f0, 0.3);
+      for (let x = goalX; x <= goalX + goalWidth; x += 10) {
         net.lineBetween(x, goalY, x, goalY + goalHeight);
       }
-      for (let y = goalY; y <= goalY + goalHeight; y += 12) {
+      for (let y = goalY; y <= goalY + goalHeight; y += 10) {
         net.lineBetween(goalX, y, goalX + goalWidth, y);
       }
 
+      // Marco (Postes Blancos con Sombra)
       const posts = scene.add.graphics();
-      posts.lineStyle(5, 0xffffff, 1);
+      posts.lineStyle(6, 0xffffff, 1);
       posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
 
       // RETÍCULA DE APUNTADO
-      aimTarget = scene.add.circle(targetAimX, targetAimY, 12, 0xeab308, 0.6);
-      scene.add.circle(targetAimX, targetAimY, 4, 0xffffff);
+      aimTarget = scene.add.container(targetAimX, targetAimY);
+      const aimOuter = scene.add.circle(0, 0, 14, 0xeab308, 0.4);
+      const aimBorder = scene.add.circle(0, 0, 14).setStrokeStyle(2, 0xeab308);
+      const aimInner = scene.add.circle(0, 0, 4, 0xffffff);
+      aimTarget.add([aimOuter, aimBorder, aimInner]);
 
-      // PORTERO ORSINI (#94)
+      // PORTERO ORSINI (#94) - UNIFORME OFICIAL
       keeper = scene.add.container(width / 2, goalY + goalHeight - 15);
-      const keeperBody = scene.add.rectangle(0, -12, 16, 28, 0xeab308);
-      const keeperHead = scene.add.circle(0, -26, 6, 0xfbd23c);
-      keeper.add([keeperBody, keeperHead]);
+      const keeperBody = scene.add.rectangle(0, -12, 18, 30, 0xeab308); // Camiseta Dorada
+      const keeperShorts = scene.add.rectangle(0, 2, 18, 10, 0x0f172a); // Pantalón Negro
+      const keeperHead = scene.add.circle(0, -28, 7, 0xfbd23c);
+      const keeperNum = scene.add.text(0, -14, '94', {
+        fontFamily: "'Chakra Petch', sans-serif", fontSize: '9px', color: '#0f172a', fontStyle: 'bold'
+      }).setOrigin(0.5);
 
-      // BALÓN
+      keeper.add([keeperBody, keeperShorts, keeperHead, keeperNum]);
+
+      // BALÓN OFICIAL HD (Gajos)
       const startXPos = width / 2;
       const startYPos = height - 110;
 
@@ -104,9 +128,10 @@ export default function GameCanvas({ player, onExit }) {
 
       ball = scene.add.container(startXPos, startYPos);
       const ballBase = scene.add.circle(0, 0, 14, 0xffffff);
-      const ballPattern = scene.add.circle(0, 0, 10, 0x0f172a);
-      const ballInner = scene.add.circle(0, 0, 6, 0xffffff);
-      ball.add([ballBase, ballPattern, ballInner]);
+      const ballPattern1 = scene.add.polygon(0, 0, [0, -6, 5, -2, 3, 4, -3, 4, -5, -2], 0x0f172a);
+      const ballPattern2 = scene.add.circle(-8, -4, 3, 0x0f172a);
+      const ballPattern3 = scene.add.circle(8, -4, 3, 0x0f172a);
+      ball.add([ballBase, ballPattern1, ballPattern2, ballPattern3]);
 
       trailGraphics = scene.add.graphics();
 
@@ -128,9 +153,8 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // EVENTOS TÁCTILES ROBUSTOS EN JAVASCRIPT NATIVO
+      // CONTROLES TÁCTILES
       const container = document.getElementById('phaser-game-container');
-
       let chargingState = false;
 
       const startCharge = (e) => {
@@ -143,7 +167,7 @@ export default function GameCanvas({ player, onExit }) {
         if (powerInterval) clearInterval(powerInterval);
         powerInterval = setInterval(() => {
           if (powerIncreasing) {
-            powerValue += 4; // Velocidad regulada
+            powerValue += 4;
             if (powerValue >= 100) powerIncreasing = false;
           } else {
             powerValue -= 4;
@@ -170,6 +194,7 @@ export default function GameCanvas({ player, onExit }) {
         setIsCharging(false);
         isShooting = true;
 
+        sfx.playKick(); // Sonido de Patada
         executeShot(scene, targetAimX, targetAimY, powerValue, width, height, startXPos, startYPos);
       };
 
@@ -178,7 +203,6 @@ export default function GameCanvas({ player, onExit }) {
         container.addEventListener('touchmove', moveAim, { passive: true });
         container.addEventListener('touchend', releaseShot, { passive: true });
 
-        // Fallback Mouse para escritorio
         container.addEventListener('mousedown', (e) => { startCharge(e); moveAim(e); });
         container.addEventListener('mousemove', moveAim);
         container.addEventListener('mouseup', releaseShot);
@@ -227,6 +251,7 @@ export default function GameCanvas({ player, onExit }) {
           const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, finalY);
 
           ball.setPosition(px, py);
+          ball.setRotation(progress * 12); // Rotación del balón en el aire
           ball.setScale(1 - progress * 0.55);
           ballShadow.setPosition(px, py + 12 * (1 - progress));
 
@@ -234,19 +259,23 @@ export default function GameCanvas({ player, onExit }) {
           trailGraphics.lineStyle(3, 0xeab308, 0.6);
           trailGraphics.lineBetween(startXPos, startYPos, px, py);
 
+          // COLISIÓN BARRERA
           wallGroup.forEach(d => {
             if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
               hasCollided = true;
               tween.stop();
               trailGraphics.clear();
+              sfx.playHit();
               handleCollision(scene, 'BARRERA!');
             }
           });
 
+          // COLISIÓN PORTERO
           if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
             hasCollided = true;
             tween.stop();
             trailGraphics.clear();
+            sfx.playHit();
             handleCollision(scene, 'TAPÓ!');
           }
         },
@@ -279,11 +308,13 @@ export default function GameCanvas({ player, onExit }) {
 
       for (let i = 0; i < numDefenders; i++) {
         const defender = scene.add.container(startWallX + i * 22, wallY);
-        const body = scene.add.rectangle(0, 0, 16, 36, 0x1e293b);
-        const shirtBorder = scene.add.rectangle(0, -10, 16, 4, 0xeab308);
+        
+        // Camiseta Oficial Negro y Dorado Prom '07
+        const body = scene.add.rectangle(0, 0, 16, 36, 0x0f172a);
+        const goldStripe = scene.add.rectangle(0, -6, 16, 6, 0xeab308);
         const head = scene.add.circle(0, -22, 7, 0xfbd23c);
 
-        defender.add([body, shirtBorder, head]);
+        defender.add([body, goldStripe, head]);
         wallGroup.push(defender);
       }
     }
@@ -294,6 +325,7 @@ export default function GameCanvas({ player, onExit }) {
       triggerFeedback(msg);
 
       if (currentLives <= 0) {
+        sfx.playWhistle();
         triggerGameOver('¡SIN VIDAS!');
       } else {
         resetBall(scene);
@@ -305,8 +337,10 @@ export default function GameCanvas({ player, onExit }) {
       const inGoalY = targetY >= goalY && targetY <= goalY + goalHeight;
 
       if (!inGoalX || !inGoalY) {
+        sfx.playHit();
         handleCollision(scene, 'FUERA!');
       } else {
+        sfx.playGoal(); // Sonido de Gol
         totalGoals += 1;
         const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && targetY < goalY + 30;
         const pts = isCorner ? 250 : 100;
@@ -333,6 +367,7 @@ export default function GameCanvas({ player, onExit }) {
       scene.time.delayedCall(600, () => {
         if (isGameOver) return;
         ball.setPosition(width / 2, height - 110);
+        ball.setRotation(0);
         ball.setScale(1);
         ballShadow.setPosition(width / 2, height - 98);
         ballShadow.setScale(1);
@@ -374,7 +409,7 @@ export default function GameCanvas({ player, onExit }) {
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD LIMPIO, SEPARADO Y ADAPTADO A NOTCH/ISLA DINÁMICA */}
+      {/* HUD LIMPIO */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -392,18 +427,15 @@ export default function GameCanvas({ player, onExit }) {
         borderBottom: '2px solid #eab308',
         boxSizing: 'border-box'
       }}>
-        {/* Lado Izquierdo: Puntaje y Nivel */}
         <div style={{ lineHeight: '1.2' }}>
           <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
           <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#3b82f6' }}>NIVEL: {level}</div>
         </div>
 
-        {/* Centro: Reloj Destacado */}
         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#ef4444', letterSpacing: '1px', textAlign: 'center' }}>
           00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
         </div>
 
-        {/* Lado Derecho: Vidas + Botón Salir */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
           <div style={{ fontSize: '10px', color: '#ef4444' }}>
             {'❤️'.repeat(Math.max(0, lives))}
@@ -426,7 +458,7 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       </div>
 
-      {/* BARRA DE POTENCIA TIPO ARCADE INFERIOR */}
+      {/* BARRA DE POTENCIA ARCADE */}
       {isCharging && (
         <div style={{
           position: 'fixed',
