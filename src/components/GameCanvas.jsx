@@ -128,51 +128,61 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // MECÁNICA AIM + HOLD FOR POWER + RELEASE
-      scene.input.on('pointermove', (pointer) => {
-        if (isShooting || isGameOver || isCharging) return;
-        // Ajustar mira dentro del arco
-        targetAimX = Phaser.Math.Clamp(pointer.x, goalX + 10, goalX + goalWidth - 10);
-        targetAimY = Phaser.Math.Clamp(pointer.y, goalY + 10, goalY + goalHeight - 10);
-        aimTarget.setPosition(targetAimX, targetAimY);
-      });
+      // EVENTOS TÁCTILES NATIVOS PARA EVITAR BLOQUEO EN iOS
+      const container = document.getElementById('phaser-game-container');
 
-      scene.input.on('pointerdown', () => {
+      const handleTouchMove = (e) => {
         if (isShooting || isGameOver) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        
+        targetAimX = Phaser.Math.Clamp(touch.clientX, goalX + 10, goalX + goalWidth - 10);
+        targetAimY = Phaser.Math.Clamp(touch.clientY, goalY + 10, goalY + goalHeight - 10);
+        aimTarget.setPosition(targetAimX, targetAimY);
+      };
+
+      const handleTouchStart = (e) => {
+        if (isShooting || isGameOver || isCharging) return;
         setIsCharging(true);
         powerValue = 10;
         powerIncreasing = true;
 
+        if (powerInterval) clearInterval(powerInterval);
         powerInterval = setInterval(() => {
           if (powerIncreasing) {
-            powerValue += 5;
+            powerValue += 6;
             if (powerValue >= 100) powerIncreasing = false;
           } else {
-            powerValue -= 5;
+            powerValue -= 6;
             if (powerValue <= 10) powerIncreasing = true;
           }
           setPower(powerValue);
-        }, 30);
-      });
+        }, 25);
+      };
 
-      scene.input.on('pointerup', () => {
+      const handleTouchEnd = () => {
         if (!isCharging || isShooting || isGameOver) return;
         clearInterval(powerInterval);
         setIsCharging(false);
         isShooting = true;
 
         executeShot(scene, targetAimX, targetAimY, powerValue, width, height, startXPos, startYPos);
-      });
+      };
+
+      if (container) {
+        container.addEventListener('touchmove', handleTouchMove, { passive: false });
+        container.addEventListener('touchstart', handleTouchStart, { passive: false });
+        container.addEventListener('touchend', handleTouchEnd, { passive: false });
+      }
     }
 
     function executeShot(scene, tx, ty, pValue, width, height, startXPos, startYPos) {
-      // Cálculo de Altura según Potencia
-      // Potencia baja = Tiro Raso, Potencia media = Media Altura, Potencia alta = Ángulo
-      let finalY = goalY + goalHeight - 10; // Raso por defecto
+      // Determinación de altura según la barra de potencia
+      let finalY = goalY + goalHeight - 10;
       if (pValue > 40 && pValue <= 75) {
-        finalY = goalY + (goalHeight / 2); // Media altura
+        finalY = goalY + (goalHeight / 2);
       } else if (pValue > 75) {
-        finalY = goalY + 15; // Ángulo
+        finalY = goalY + 15;
       }
 
       const powerStat = player ? player.power : 20;
@@ -182,7 +192,6 @@ export default function GameCanvas({ player, onExit }) {
       const controlX = startXPos + ((tx - startXPos) * (1 + curveStat / 80));
       const controlY = height * 0.48;
 
-      // Movimiento del Portero
       const isCorner = (tx < goalX + 35 || tx > goalX + goalWidth - 35);
       const keeperSpeed = isCorner ? 0.45 : 0.7;
       const keeperTargetX = Phaser.Math.Clamp(tx, goalX + 18, goalX + goalWidth - 18);
@@ -329,7 +338,7 @@ export default function GameCanvas({ player, onExit }) {
 
     function triggerFeedback(text) {
       setFeedback(text);
-      setTimeout(() => setFeedback(''), 400); // 0.4s súper rápido e inobstrusivo
+      setTimeout(() => setFeedback(''), 400);
     }
 
     function triggerGameOver(reason) {
@@ -359,7 +368,7 @@ export default function GameCanvas({ player, onExit }) {
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD UNIVERSAL CON SAFARI/IOS SAFE AREA FIX */}
+      {/* HUD FIX NATIVO CON SAFE AREA */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -406,7 +415,7 @@ export default function GameCanvas({ player, onExit }) {
         </button>
       </div>
 
-      {/* BARRA DE POTENCIA TIPO ARCADE EN LA PARTE INFERIOR */}
+      {/* BARRA DE POTENCIA TIPO ARCADE INFERIOR */}
       {isCharging && (
         <div style={{
           position: 'fixed',
@@ -425,12 +434,12 @@ export default function GameCanvas({ player, onExit }) {
             width: `${power}%`,
             height: '100%',
             backgroundColor: power > 75 ? '#ef4444' : power > 40 ? '#eab308' : '#22c55e',
-            transition: 'width 0.03s linear'
+            transition: 'width 0.02s linear'
           }} />
         </div>
       )}
 
-      {/* FEEDBACK MÍNIMO E INVASIVIDAD CERO */}
+      {/* FEEDBACK INVASIVIDAD CERO */}
       {feedback && (
         <div style={{
           position: 'fixed',
@@ -447,7 +456,7 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       )}
 
-      {/* LIENZO DE PHASER */}
+      {/* CANAL DE JUEGO */}
       <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
 
       {/* GAMEOVER MODAL */}
