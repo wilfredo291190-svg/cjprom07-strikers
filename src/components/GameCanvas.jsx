@@ -59,7 +59,7 @@ export default function GameCanvas({ player, onExit }) {
         bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
 
-      // PORTERÍA Y RED
+      // PORTERÍA
       goalWidth = Math.min(width * 0.72, 320);
       goalHeight = 90;
       goalX = (width - goalWidth) / 2;
@@ -80,8 +80,8 @@ export default function GameCanvas({ player, onExit }) {
 
       // PORTERO ORSINI (#94)
       keeper = scene.add.container(width / 2, goalY + goalHeight - 15);
-      keeperBody = scene.add.rectangle(0, -12, 22, 34, 0xeab308);
-      const keeperHead = scene.add.circle(0, -32, 7, 0xfbd23c);
+      keeperBody = scene.add.rectangle(0, -12, 18, 30, 0xeab308);
+      const keeperHead = scene.add.circle(0, -28, 6, 0xfbd23c);
       keeper.add([keeperBody, keeperHead]);
 
       // BALÓN Y SOMBRA
@@ -100,7 +100,7 @@ export default function GameCanvas({ player, onExit }) {
 
       spawnWall(scene, currentLevel, width, height);
 
-      // RELOJ FIJO DE 60s
+      // TIMER
       timerEvent = scene.time.addEvent({
         delay: 1000,
         callback: () => {
@@ -116,7 +116,7 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // CONTROLES TÁCTILES
+      // CONTROLES DE TIRO BASADOS EN SWIPE
       scene.input.on('pointerdown', (pointer) => {
         if (isShooting || isGameOver) return;
         startX = pointer.x;
@@ -127,37 +127,44 @@ export default function GameCanvas({ player, onExit }) {
       scene.input.on('pointerup', (pointer) => {
         if (isShooting || isGameOver || !startX) return;
 
-        const duration = pointer.time - startTime;
+        const duration = Math.max(50, pointer.time - startTime);
         const deltaX = pointer.x - startX;
         const deltaY = pointer.y - startY;
 
-        if (deltaY < -25 && duration < 800) {
+        if (deltaY < -20) {
           isShooting = true;
 
-          const curveFactor = ((player ? player.curve : 20) / 100) * deltaX;
-          const controlX = ball.x + deltaX + curveFactor;
-          const controlY = height * 0.5;
-          const targetX = Phaser.Math.Clamp(ball.x + deltaX, goalX - 20, goalX + goalWidth + 20);
+          // Cálculo de velocidad por gesto y stat
+          const swipeVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / duration;
+          const powerStat = player ? player.power : 20;
+          const shotSpeed = Math.max(220, 700 - (swipeVelocity * 180) - (powerStat * 3.5));
+
+          // Cálculo de curva
+          const curveStat = player ? player.curve : 20;
+          const controlX = ball.x + (deltaX * (1 + curveStat / 50));
+          const controlY = height * 0.48;
+          const targetX = Phaser.Math.Clamp(ball.x + deltaX * 1.1, goalX - 15, goalX + goalWidth + 15);
           const targetY = goalY + (goalHeight / 2);
 
-          const speed = Math.max(300, 750 - ((player ? player.power : 20) * 4));
+          // IA adaptativa de Orsini por nivel
+          const keeperSpeedFactor = currentLevel === 1 ? 0.35 : currentLevel <= 3 ? 0.55 : 0.8;
+          const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 25, goalX + goalWidth - 25);
 
-          // Estirada del Portero
           scene.tweens.add({
             targets: keeper,
-            x: Phaser.Math.Clamp(targetX, goalX + 15, goalX + goalWidth - 15),
-            duration: speed * 0.7,
-            ease: 'Power2.out'
+            x: keeperTargetX,
+            duration: shotSpeed / keeperSpeedFactor,
+            ease: 'Power1.out'
           });
 
-          // Trayectoria Bézier del Balón
+          // Trayectoria
           let progress = 0;
           let hasCollided = false;
 
           scene.tweens.add({
             targets: { t: 0 },
             t: 1,
-            duration: speed,
+            duration: shotSpeed,
             ease: 'Power1.out',
             onUpdate: (tween, target) => {
               if (hasCollided) return;
@@ -167,18 +174,17 @@ export default function GameCanvas({ player, onExit }) {
               const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, targetY);
 
               ball.setPosition(px, py);
-              ball.setScale(1 - (progress * 0.55));
-              ballShadow.setPosition(px, py + (12 * (1 - progress)));
-              ballShadow.setScale(1 - (progress * 0.55));
+              ball.setScale(1 - progress * 0.55);
+              ballShadow.setPosition(px, py + 12 * (1 - progress));
+              ballShadow.setScale(1 - progress * 0.55);
 
-              // Rastro en pantalla
               trailGraphics.clear();
               trailGraphics.lineStyle(3, 0xeab308, 0.6);
               trailGraphics.lineBetween(startXPos, startYPos, px, py);
 
-              // COLISIÓN 1: BARRERA
+              // COLISIÓN BARRERA
               wallGroup.forEach(d => {
-                if (Math.abs(px - d.x) < 18 && Math.abs(py - d.y) < 25) {
+                if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
                   hasCollided = true;
                   tween.stop();
                   trailGraphics.clear();
@@ -186,8 +192,8 @@ export default function GameCanvas({ player, onExit }) {
                 }
               });
 
-              // COLISIÓN 2: PORTERO ORSINI
-              if (!hasCollided && Math.abs(px - keeper.x) < 22 && Math.abs(py - (goalY + goalHeight - 15)) < 25 && progress > 0.7) {
+              // COLISIÓN ORSINI (Hitbox reducido)
+              if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 15)) < 18 && progress > 0.75) {
                 hasCollided = true;
                 tween.stop();
                 trailGraphics.clear();
@@ -208,7 +214,7 @@ export default function GameCanvas({ player, onExit }) {
     function updateScene() {
       if (currentLevel >= 4 && wallGroup.length > 0 && !isGameOver) {
         wallGroup.forEach(defender => {
-          defender.x += Math.sin(this.time.now / 250) * 1.5;
+          defender.x += Math.sin(this.time.now / 300) * 1.2;
         });
       }
     }
@@ -221,10 +227,10 @@ export default function GameCanvas({ player, onExit }) {
 
       const numDefenders = levelNum === 2 ? 2 : levelNum === 3 ? 3 : 4;
       const wallY = height * 0.52;
-      const startWallX = (width / 2) - ((numDefenders - 1) * 22) / 2;
+      const startWallX = width / 2 - ((numDefenders - 1) * 22) / 2;
 
       for (let i = 0; i < numDefenders; i++) {
-        const defender = scene.add.container(startWallX + (i * 22), wallY);
+        const defender = scene.add.container(startWallX + i * 22, wallY);
         const body = scene.add.rectangle(0, 0, 16, 36, 0x1e293b);
         const shirtBorder = scene.add.rectangle(0, -10, 16, 4, 0xeab308);
         const head = scene.add.circle(0, -22, 7, 0xfbd23c);
@@ -247,14 +253,14 @@ export default function GameCanvas({ player, onExit }) {
     }
 
     function evaluateShot(scene, targetX, targetY, width, height) {
-      const inGoalX = targetX >= goalX && targetX <= (goalX + goalWidth);
-      const inGoalY = targetY >= goalY && targetY <= (goalY + goalHeight);
+      const inGoalX = targetX >= goalX && targetX <= goalX + goalWidth;
+      const inGoalY = targetY >= goalY && targetY <= goalY + goalHeight;
 
       if (!inGoalX || !inGoalY) {
         handleCollision(scene, '¡FUERA!');
       } else {
         totalGoals += 1;
-        const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && (targetY < goalY + 30);
+        const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && targetY < goalY + 30;
         const pts = isCorner ? 250 : 100;
         currentScore += pts;
         setScore(currentScore);
@@ -317,7 +323,7 @@ export default function GameCanvas({ player, onExit }) {
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD React Garantizado y Visible */}
+      {/* HUD SUPERIOR */}
       <div style={{
         position: 'absolute',
         top: 0,
@@ -344,23 +350,41 @@ export default function GameCanvas({ player, onExit }) {
           {'❤️'.repeat(Math.max(0, lives))}
         </div>
 
-        <button
-          onClick={() => onExit(0)}
-          style={{
-            backgroundColor: '#1e293b',
-            color: '#eab308',
-            border: '1px solid #eab308',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '9px',
-            fontWeight: '700'
-          }}
-        >
-          SALIR
-        </button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {/* Botón Test para saltar directo a mejoras */}
+          <button
+            onClick={() => onExit(500)}
+            style={{
+              backgroundColor: '#22c55e',
+              color: '#0a0f1d',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '4px 8px',
+              fontSize: '9px',
+              fontWeight: 'bold'
+            }}
+          >
+            +500 EXP (TEST)
+          </button>
+
+          <button
+            onClick={() => onExit(0)}
+            style={{
+              backgroundColor: '#1e293b',
+              color: '#eab308',
+              border: '1px solid #eab308',
+              borderRadius: '4px',
+              padding: '4px 8px',
+              fontSize: '9px',
+              fontWeight: '700'
+            }}
+          >
+            SALIR
+          </button>
+        </div>
       </div>
 
-      {/* Feedback Central */}
+      {/* FEEDBACK CENTRAL */}
       {feedback && (
         <div style={{
           position: 'absolute',
@@ -381,10 +405,10 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       )}
 
-      {/* Contenedor del Lienzo */}
+      {/* CANVAS */}
       <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
 
-      {/* Pantalla Final de Game Over */}
+      {/* GAMEOVER MODAL */}
       {gameOverData && (
         <div style={{
           position: 'absolute',
