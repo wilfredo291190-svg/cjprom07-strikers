@@ -18,7 +18,7 @@ export default function GameCanvas({ player, onExit }) {
 
     // 1. ESCENA, CÁMARA Y RENDERIZADOR 3D
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0f1d); // Fondo nocturno oscuro
+    scene.background = new THREE.Color(0x0a0f1d);
     scene.fog = new THREE.FogExp2(0x0a0f1d, 0.015);
 
     const camera = new THREE.PerspectiveCamera(
@@ -48,7 +48,7 @@ export default function GameCanvas({ player, onExit }) {
     dirLight.shadow.mapSize.height = 1024;
     scene.add(dirLight);
 
-    // 3. CANCHA Y GRADERÍAS EN 3D (Carreras y Obstáculos)
+    // 3. CANCHA Y GRADERÍAS EN 3D
     const fieldGeo = new THREE.PlaneGeometry(30, 120);
     const fieldMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.8 });
     const field = new THREE.Mesh(fieldGeo, fieldMat);
@@ -57,7 +57,6 @@ export default function GameCanvas({ player, onExit }) {
     field.receiveShadow = true;
     scene.add(field);
 
-    // Franjas de pasto
     for (let i = -90; i < 30; i += 5) {
       if ((i / 5) % 2 === 0) {
         const stripeGeo = new THREE.PlaneGeometry(30, 5);
@@ -70,7 +69,6 @@ export default function GameCanvas({ player, onExit }) {
       }
     }
 
-    // Graderías/Estadio al fondo
     const stadiumGeo = new THREE.BoxGeometry(40, 12, 5);
     const stadiumMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
     const stadium = new THREE.Mesh(stadiumGeo, stadiumMat);
@@ -84,7 +82,6 @@ export default function GameCanvas({ player, onExit }) {
 
     const postMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
     
-    // Travesaño superior
     const crossbarGeo = new THREE.CylinderGeometry(0.06, 0.06, goalWidth, 16);
     const crossbar = new THREE.Mesh(crossbarGeo, postMat);
     crossbar.rotation.z = Math.PI / 2;
@@ -92,7 +89,6 @@ export default function GameCanvas({ player, onExit }) {
     crossbar.castShadow = true;
     scene.add(crossbar);
 
-    // Postes laterales
     const postGeo = new THREE.CylinderGeometry(0.06, 0.06, goalHeight, 16);
     const leftPost = new THREE.Mesh(postGeo, postMat);
     leftPost.position.set(-goalWidth / 2, goalHeight / 2, goalZ);
@@ -104,10 +100,9 @@ export default function GameCanvas({ player, onExit }) {
     rightPost.castShadow = true;
     scene.add(rightPost);
 
-    // 5. JUGADOR EN CARRERA (3D Completo)
+    // 5. JUGADOR EN CARRERA
     const playerGroup = new THREE.Group();
     
-    // Piernas (En carrera)
     const legGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.45);
     const legMat = new THREE.MeshStandardMaterial({ color: 0x0a0f1d });
     const legL = new THREE.Mesh(legGeo, legMat);
@@ -118,22 +113,19 @@ export default function GameCanvas({ player, onExit }) {
     legR.position.set(0.15, 0.22, 0);
     playerGroup.add(legR);
 
-    // Cuerpo
     const bodyGeo = new THREE.CylinderGeometry(0.2, 0.16, 0.7, 16);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0f172a }); // Camiseta Negra Prom '07
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
     const pBody = new THREE.Mesh(bodyGeo, bodyMat);
     pBody.position.y = 0.75;
     pBody.castShadow = true;
     playerGroup.add(pBody);
 
-    // Franja Dorada de la Prom
     const stripeGeo = new THREE.CylinderGeometry(0.205, 0.19, 0.12, 16);
     const stripeMat = new THREE.MeshStandardMaterial({ color: 0xeab308 });
     const pStripe = new THREE.Mesh(stripeGeo, stripeMat);
     pStripe.position.set(0, 0.82, 0);
     playerGroup.add(pStripe);
 
-    // Cabeza
     const headGeo = new THREE.SphereGeometry(0.16, 16, 16);
     const headMat = new THREE.MeshStandardMaterial({ color: 0xfbd23c });
     const pHead = new THREE.Mesh(headGeo, headMat);
@@ -152,10 +144,10 @@ export default function GameCanvas({ player, onExit }) {
     ball.castShadow = true;
     scene.add(ball);
 
-    // 7. PORTERO ORSINI (#94) AL FONDO
+    // 7. PORTERO ORSINI (#94)
     const keeperGroup = new THREE.Group();
     const kBodyGeo = new THREE.CylinderGeometry(0.2, 0.16, 0.7, 16);
-    const kBodyMat = new THREE.MeshStandardMaterial({ color: 0xeab308 }); // Camiseta Dorada
+    const kBodyMat = new THREE.MeshStandardMaterial({ color: 0xeab308 });
     const kBody = new THREE.Mesh(kBodyGeo, kBodyMat);
     kBody.position.y = 0.75;
     kBody.castShadow = true;
@@ -170,12 +162,11 @@ export default function GameCanvas({ player, onExit }) {
     keeperGroup.position.set(0, 0, goalZ + 0.3);
     scene.add(keeperGroup);
 
-    // Silbato de inicio
     sfx.playWhistle();
 
-    // 8. VARIABLES DE JUEGO Y CARRILES
+    // 8. CARRILES Y MECÁNICA DE REGATE
     const laneWidth = 2.4;
-    let currentLane = 1; // 0: Izquierda, 1: Centro, 2: Derecha
+    let currentLane = 1;
     const targetLanesX = [-laneWidth, 0, laneWidth];
 
     let currentScore = 0;
@@ -185,21 +176,18 @@ export default function GameCanvas({ player, onExit }) {
     let isGameOver = false;
 
     let defenders = [];
-    let gamePhase = 'RUNNING'; // 'RUNNING' o 'SHOOTING'
-    let distanceToGoal = 56; // Inicias a 56 metros de la portería
+    let gamePhase = 'RUNNING';
 
-    // Generar 4 barreras de rivales escalonadas
     const spawnDefenders = () => {
       defenders.forEach(d => scene.remove(d.mesh));
       defenders = [];
 
-      const defenderMat = new THREE.MeshStandardMaterial({ color: 0xef4444 }); // Rivales en rojo
+      const defenderMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
       const defGeo = new THREE.CylinderGeometry(0.18, 0.14, 0.75, 16);
 
       for (let i = 0; i < 4; i++) {
-        // Dejar un carril vacío al azar
         const emptyLane = Math.floor(Math.random() * 3);
-        const zPos = 0 - (i * 12); // Separados por 12 metros
+        const zPos = 0 - (i * 12);
 
         for (let l = 0; l < 3; l++) {
           if (l !== emptyLane) {
@@ -225,7 +213,6 @@ export default function GameCanvas({ player, onExit }) {
 
     spawnDefenders();
 
-    // Contador de tiempo
     const timerInterval = setInterval(() => {
       if (isGameOver) return;
       currentTime -= 1;
@@ -233,7 +220,7 @@ export default function GameCanvas({ player, onExit }) {
       if (currentTime <= 0) triggerGameOver('¡TIEMPO AGOTADO!');
     }, 1000);
 
-    // 9. CONTROLES TÁCTILES (SWIPES)
+    // 9. EVENTOS TÁCTILES
     let startXPos, startYPos;
 
     const handleStart = (e) => {
@@ -250,13 +237,11 @@ export default function GameCanvas({ player, onExit }) {
       const deltaY = t.clientY - startYPos;
 
       if (gamePhase === 'RUNNING') {
-        // Movimiento a la izquierda / derecha para esquivar
         if (Math.abs(deltaX) > 25) {
           if (deltaX > 0 && currentLane < 2) currentLane++;
           else if (deltaX < 0 && currentLane > 0) currentLane--;
         }
       } else if (gamePhase === 'SHOOTING') {
-        // Disparo final al arco (Swipe hacia arriba)
         if (deltaY < -25) {
           executeShot(deltaX / 100);
         }
@@ -268,7 +253,7 @@ export default function GameCanvas({ player, onExit }) {
     container.addEventListener('mousedown', handleStart);
     container.addEventListener('mouseup', handleEnd);
 
-    // 10. ANIMACIÓN DEL DISPARO Y GOL
+    // 10. ANIMACIÓN Y VUELO DEL BALÓN
     let isBallFlying = false;
     let ballFlyProgress = 0;
     let shotTargetX = 0;
@@ -279,54 +264,40 @@ export default function GameCanvas({ player, onExit }) {
       ballFlyProgress = 0;
       sfx.playKick();
 
-      // Apuntar a donde fue el swipe
       shotTargetX = THREE.MathUtils.clamp(playerGroup.position.x + (curveValue * 4), -goalWidth / 2 + 0.4, goalWidth / 2 - 0.4);
-      shotTargetY = 0.5 + Math.random() * (goalHeight - 0.6); // Altura al azar dentro del marco
-
-      // Orsini se lanza a tapar
-      const kSpeed = Math.abs(shotTargetX - keeperGroup.position.x) > 1.2 ? 0.08 : 0.05;
-      scene.tweens = scene.tweens || [];
+      shotTargetY = 0.5 + Math.random() * (goalHeight - 0.6);
     };
 
-    // 11. BUCLE DE JUEGO (GAME LOOP)
+    // 11. BUCLE DE RENDIMIENTO
     let animFrameId;
 
     const animate = () => {
       animFrameId = requestAnimationFrame(animate);
 
       if (!isGameOver) {
-        // Suave interpolación de carril del jugador
         playerGroup.position.x = THREE.MathUtils.lerp(playerGroup.position.x, targetLanesX[currentLane], 0.15);
         if (!isBallFlying) {
           ball.position.x = playerGroup.position.x;
         }
 
         if (gamePhase === 'RUNNING') {
-          // El escenario se mueve hacia el jugador para simular carrera
           defenders.forEach(d => {
-            d.mesh.position.z += 0.22; // Velocidad de carrera de defensores
+            d.mesh.position.z += 0.22;
 
-            // Detección de colisión / tacleada
             if (Math.abs(d.mesh.position.z - playerGroup.position.z) < 0.45 && d.lane === currentLane) {
               sfx.playHit();
               handleLifeLoss('¡BARRIDA RIVAL!');
             }
           });
 
-          // Reducir la distancia a la portería
-          distanceToGoal = Math.max(12, 56 - Math.floor(defenders[0]?.mesh.position.z * 1.5));
-          
-          // Fase de definición (Penal)
           if (defenders.every(d => d.mesh.position.z > playerGroup.position.z + 1.5)) {
             triggerShootingPhase();
           }
         } else if (gamePhase === 'SHOOTING' && isBallFlying) {
-          // Animación del Balón en Vuelo
           ballFlyProgress += 0.038;
 
           if (ballFlyProgress < 1) {
             const t = ballFlyProgress;
-            // Curva parabólica simple 3D
             const bz = THREE.MathUtils.lerp(playerGroup.position.z + 0.7, goalZ, t);
             const bx = THREE.MathUtils.lerp(playerGroup.position.x, shotTargetX, t);
             const by = THREE.MathUtils.lerp(0.18, shotTargetY, t) + Math.sin(t * Math.PI) * 1.4;
@@ -334,10 +305,8 @@ export default function GameCanvas({ player, onExit }) {
             ball.position.set(bx, by, bz);
             ball.rotation.x += 0.35;
 
-            // Portero Orsini intentando tapar en 3D
             keeperGroup.position.x = THREE.MathUtils.lerp(keeperGroup.position.x, shotTargetX * 0.7, 0.04);
           } else {
-            // Evaluar si fue gol, fuera o si tapó Orsini
             isBallFlying = false;
             evalShotResult(shotTargetX, shotTargetY);
           }
@@ -351,11 +320,10 @@ export default function GameCanvas({ player, onExit }) {
 
     function triggerShootingPhase() {
       gamePhase = 'SHOOTING';
-      triggerFeedback('¡ZONA DE DISPARO! ¡MATE!');
+      triggerFeedback('¡ZONA DE DISPARO!');
     }
 
     function evalShotResult(tx, ty) {
-      // Comparar coordenadas de impacto con la estirada de Orsini
       const saved = Math.abs(tx - keeperGroup.position.x) < 0.8 && ty < 1.7;
 
       if (saved) {
@@ -480,7 +448,7 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       </div>
 
-      {/* FEEDBACK CENTRADO */}
+      {/* FEEDBACK */}
       {feedback && (
         <div style={{
           position: 'fixed',
@@ -498,10 +466,10 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       )}
 
-      {/* RECEPTOR DE LA ESCENA THREE.JS */}
+      {/* CONTENEDOR THREE.JS */}
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
 
-      {/* GAMEOVER MODAL */}
+      {/* MODAL GAMEOVER */}
       {gameOverData && (
         <div style={{
           position: 'fixed',
