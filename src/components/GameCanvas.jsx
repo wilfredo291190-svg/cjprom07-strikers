@@ -116,7 +116,7 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // CONTROLES DE TIRO BASADOS EN SWIPE
+      // CONTROLES DE TIRO (SWIPE DINÁMICO)
       scene.input.on('pointerdown', (pointer) => {
         if (isShooting || isGameOver) return;
         startX = pointer.x;
@@ -127,41 +127,55 @@ export default function GameCanvas({ player, onExit }) {
       scene.input.on('pointerup', (pointer) => {
         if (isShooting || isGameOver || !startX) return;
 
-        const duration = Math.max(80, pointer.time - startTime);
+        const duration = Math.max(60, pointer.time - startTime);
         const deltaX = pointer.x - startX;
         const deltaY = pointer.y - startY;
+        const swipeDistanceY = Math.abs(deltaY);
 
         if (deltaY < -20) {
           isShooting = true;
 
-          // 1. Calibración de Potencia/Velocidad (Suave y Progresiva)
+          // 1. CALCULO DE ALTURA FLEXIBLE SEGÚN LONGITUD DEL SWIPE
+          let targetY;
+          let shotTypeLabel = '';
+
+          if (swipeDistanceY < 70) {
+            // Tiro Raso (al piso)
+            targetY = goalY + goalHeight - 10;
+            shotTypeLabel = 'TIRO RASO';
+          } else if (swipeDistanceY < 150) {
+            // Media Altura
+            targetY = goalY + (goalHeight / 2);
+            shotTypeLabel = 'MEDIA ALTURA';
+          } else {
+            // Ámbolo / Escuadra (Arriba)
+            targetY = goalY + 15;
+            shotTypeLabel = 'AL ÁNGULO';
+          }
+
+          // 2. CALCULO DE VELOCIDAD Y CURVA
           const powerStat = player ? player.power : 20;
-          const swipeVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / duration;
-          const shotSpeed = Phaser.Math.Clamp(650 - (swipeVelocity * 80) - (powerStat * 2), 350, 600);
-
-          // 2. Calibración de Curva y Altura
           const curveStat = player ? player.curve : 20;
-          const controlX = ball.x + (deltaX * (0.8 + curveStat / 60));
-          const controlY = height * 0.48;
-          const targetX = Phaser.Math.Clamp(ball.x + deltaX * 1.05, goalX - 15, goalX + goalWidth + 15);
-          
-          // Altura dependiente de la longitud del swipe
-          const heightFactor = Phaser.Math.Clamp(Math.abs(deltaY) / 250, 0.2, 0.9);
-          const targetY = goalY + goalHeight - (goalHeight * heightFactor);
+          const swipeVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / duration;
+          const shotSpeed = Phaser.Math.Clamp(650 - (swipeVelocity * 90) - (powerStat * 2), 320, 580);
 
-          // 3. IA de Orsini Adaptativa (Fallible en esquinas)
-          const isCornerShot = (targetX < goalX + 40 || targetX > goalX + goalWidth - 40);
-          const keeperReactDelay = isCornerShot ? 0.35 : 0.6;
-          const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 20, goalX + goalWidth - 20);
+          const controlX = ball.x + (deltaX * (0.8 + curveStat / 50));
+          const controlY = height * 0.48;
+          const targetX = Phaser.Math.Clamp(ball.x + deltaX * 1.1, goalX - 15, goalX + goalWidth + 15);
+
+          // 3. REACCIÓN DE ORSINI
+          const isCornerShot = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35);
+          const keeperSpeed = isCornerShot ? 0.4 : 0.65;
+          const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 18, goalX + goalWidth - 18);
 
           scene.tweens.add({
             targets: keeper,
             x: keeperTargetX,
-            duration: shotSpeed / keeperReactDelay,
+            duration: shotSpeed / keeperSpeed,
             ease: 'Power1.out'
           });
 
-          // Trayectoria
+          // Animación del Disparo
           let progress = 0;
           let hasCollided = false;
 
@@ -186,7 +200,7 @@ export default function GameCanvas({ player, onExit }) {
               trailGraphics.lineStyle(3, 0xeab308, 0.6);
               trailGraphics.lineBetween(startXPos, startYPos, px, py);
 
-              // COLISIÓN BARRERA
+              // COLISIONES
               wallGroup.forEach(d => {
                 if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
                   hasCollided = true;
@@ -196,7 +210,6 @@ export default function GameCanvas({ player, onExit }) {
                 }
               });
 
-              // COLISIÓN ORSINI (Hitbox justo)
               if (!hasCollided && Math.abs(px - keeper.x) < 14 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
                 hasCollided = true;
                 tween.stop();
@@ -207,7 +220,7 @@ export default function GameCanvas({ player, onExit }) {
             onComplete: () => {
               if (!hasCollided) {
                 trailGraphics.clear();
-                evaluateShot(scene, targetX, targetY, width, height);
+                evaluateShot(scene, targetX, targetY, width, height, shotTypeLabel);
               }
             }
           });
@@ -256,7 +269,7 @@ export default function GameCanvas({ player, onExit }) {
       }
     }
 
-    function evaluateShot(scene, targetX, targetY, width, height) {
+    function evaluateShot(scene, targetX, targetY, width, height, shotTypeLabel) {
       const inGoalX = targetX >= goalX && targetX <= goalX + goalWidth;
       const inGoalY = targetY >= goalY && targetY <= goalY + goalHeight;
 
@@ -269,7 +282,7 @@ export default function GameCanvas({ player, onExit }) {
         currentScore += pts;
         setScore(currentScore);
 
-        triggerFeedback(isCorner ? '¡ESCUADRA!' : '¡GOOOL!');
+        triggerFeedback(`${isCorner ? '¡ESCUADRA!' : '¡GOOOL!'} (${shotTypeLabel})`);
 
         const newLvl = Math.min(5, 1 + Math.floor(totalGoals / 2));
         if (newLvl !== currentLevel) {
@@ -327,26 +340,28 @@ export default function GameCanvas({ player, onExit }) {
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD SUPERIOR GARANTIZADO */}
+      {/* HUD HTML FIX SUPREMO - Z-INDEX 9999 */}
       <div style={{
-        position: 'absolute',
+        position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
-        padding: '12px 16px',
+        height: '44px',
+        padding: '0 12px',
         display: 'flex',
         justify: 'space-between',
         alignItems: 'center',
-        zIndex: 50,
-        backgroundColor: 'rgba(10, 15, 29, 0.90)',
-        borderBottom: '1px solid #eab308'
+        zIndex: 9999,
+        backgroundColor: '#0f172a',
+        borderBottom: '2px solid #eab308',
+        boxSizing: 'border-box'
       }}>
-        <div>
-          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
-          <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#3b82f6' }}>NIVEL: {level}</div>
+        <div style={{ lineHeight: '1.2' }}>
+          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
+          <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#3b82f6' }}>NIVEL: {level}</div>
         </div>
 
-        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ef4444' }}>
+        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ef4444', letterSpacing: '1px' }}>
           00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
         </div>
 
@@ -373,31 +388,32 @@ export default function GameCanvas({ player, onExit }) {
       {/* FEEDBACK CENTRAL */}
       {feedback && (
         <div style={{
-          position: 'absolute',
+          position: 'fixed',
           top: '40%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          fontSize: '22px',
+          fontSize: '20px',
           fontWeight: 'bold',
           color: '#eab308',
-          zIndex: 60,
+          zIndex: 9999,
           textShadow: '0 2px 8px rgba(0,0,0,0.9)',
-          backgroundColor: 'rgba(17, 24, 39, 0.9)',
-          padding: '6px 16px',
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          padding: '8px 16px',
           borderRadius: '8px',
-          border: '1px solid #eab308'
+          border: '1px solid #eab308',
+          textAlign: 'center'
         }}>
           {feedback}
         </div>
       )}
 
-      {/* CANVAS */}
-      <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
+      {/* CANVAS DEL JUEGO */}
+      <div id="phaser-game-container" style={{ width: '100%', height: '100%', paddingTop: '44px', boxSizing: 'border-box' }} />
 
       {/* GAMEOVER MODAL */}
       {gameOverData && (
         <div style={{
-          position: 'absolute',
+          position: 'fixed',
           inset: 0,
           backgroundColor: 'rgba(10, 15, 29, 0.96)',
           display: 'flex',
@@ -405,7 +421,7 @@ export default function GameCanvas({ player, onExit }) {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '20px',
-          zIndex: 100
+          zIndex: 99999
         }}>
           <h2 style={{ fontSize: '24px', color: '#ef4444', margin: '0 0 12px 0', textTransform: 'uppercase' }}>
             {gameOverData.reason}
