@@ -1,337 +1,214 @@
-import React, { useEffect, useRef } from 'react';
-import Phaser from 'phaser';
+import React, { useState } from 'react';
+import { ROSTER_PROM07 } from './data/roster';
+import GameCanvas from './components/GameCanvas';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 
-export default function GameCanvas({ player, onExit }) {
-  const gameRef = useRef(null);
-
-  useEffect(() => {
-    const config = {
-      type: Phaser.AUTO,
-      parent: 'phaser-game-container',
-      width: window.innerWidth,
-      height: window.innerHeight,
-      backgroundColor: '#0a0f1d',
-      scene: {
-        create: createScene,
-        update: updateScene
-      }
-    };
-
-    const game = new Phaser.Game(config);
-    gameRef.current = game;
-
-    let ball, ballShadow;
-    let goalX, goalY, goalWidth, goalHeight;
-    let wallGroup = [];
-    let score = 0;
-    let streak = 0;
-    let maxStreak = 0;
-    let totalGoals = 0;
-    let level = 1;
-    let lives = 3;
-    let timeLeft = 60; // Partida fija de 60s
-    let timerEvent;
-
-    let scoreText, levelText, timerText, livesText, feedbackText;
-    let startX, startY, startTime;
-    let isShooting = false;
-    let isGameOver = false;
-
-    function createScene() {
-      const scene = this;
-      const width = scene.cameras.main.width;
-      const height = scene.cameras.main.height;
-
-      // CAMPO Y PERSPECTIVA
-      const bg = scene.add.graphics();
-      bg.fillStyle(0x0f172a, 1);
-      bg.fillRect(0, 0, width, height * 0.25);
-
-      const stripeHeight = (height * 0.75) / 6;
-      for (let i = 0; i < 6; i++) {
-        bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
-        bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
-      }
-
-      // PORTERÍA 2.5D
-      goalWidth = Math.min(width * 0.7, 320);
-      goalHeight = 90;
-      goalX = (width - goalWidth) / 2;
-      goalY = height * 0.22;
-
-      const net = scene.add.graphics();
-      net.lineStyle(1, 0xffffff, 0.25);
-      for (let x = goalX; x <= goalX + goalWidth; x += 12) {
-        net.lineBetween(x, goalY, x, goalY + goalHeight);
-      }
-      for (let y = goalY; y <= goalY + goalHeight; y += 12) {
-        net.lineBetween(goalX, y, goalX + goalWidth, y);
-      }
-
-      const posts = scene.add.graphics();
-      posts.lineStyle(6, 0xffffff, 1);
-      posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
-
-      // UI Y PANEL SUPERIOR
-      scoreText = scene.add.text(16, 16, `PTS: 0`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '13px', color: '#eab308', fontStyle: 'bold'
-      });
-
-      levelText = scene.add.text(16, 34, `NIVEL: 1`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '11px', color: '#3b82f6', fontStyle: 'bold'
-      });
-
-      timerText = scene.add.text(width / 2, 16, `01:00`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '18px', color: '#ef4444', fontStyle: 'bold'
-      }).setOrigin(0.5, 0);
-
-      livesText = scene.add.text(width - 16, 16, `VIDAS: ❤️❤️❤️`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '12px', color: '#ef4444', fontStyle: 'bold'
-      }).setOrigin(1, 0);
-
-      feedbackText = scene.add.text(width / 2, height * 0.45, '', {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '22px', color: '#eab308', fontStyle: 'bold'
-      }).setOrigin(0.5);
-
-      // BALÓN Y SOMBRA
-      const startXPos = width / 2;
-      const startYPos = height - 110;
-
-      ballShadow = scene.add.ellipse(startXPos, startYPos + 12, 24, 8, 0x000000, 0.4);
-      
-      ball = scene.add.container(startXPos, startYPos);
-      const ballBase = scene.add.circle(0, 0, 14, 0xffffff);
-      const ballPattern = scene.add.circle(0, 0, 10, 0x0f172a);
-      const ballInner = scene.add.circle(0, 0, 6, 0xffffff);
-      ball.add([ballBase, ballPattern, ballInner]);
-
-      spawnWall(scene, level, width, height);
-
-      // RELOJ FIJO DE 60 SEGUNDOS
-      timerEvent = scene.time.addEvent({
-        delay: 1000,
-        callback: () => {
-          if (isGameOver) return;
-          timeLeft -= 1;
-          const secs = timeLeft < 10 ? `0${timeLeft}` : `${timeLeft}`;
-          timerText.setText(`00:${secs}`);
-
-          if (timeLeft <= 0) {
-            triggerGameOver(scene, width, height, '¡TIEMPO AGOTADO!');
-          }
-        },
-        callbackScope: scene,
-        loop: true
-      });
-
-      // CONTROL TÁCTIL (SWIPE)
-      scene.input.on('pointerdown', (pointer) => {
-        if (isShooting || isGameOver) return;
-        startX = pointer.x;
-        startY = pointer.y;
-        startTime = pointer.time;
-      });
-
-      scene.input.on('pointerup', (pointer) => {
-        if (isShooting || isGameOver || !startX) return;
-
-        const duration = pointer.time - startTime;
-        const deltaX = pointer.x - startX;
-        const deltaY = pointer.y - startY;
-
-        if (deltaY < -30 && duration < 800) {
-          isShooting = true;
-
-          const curveFactor = (player ? player.curve : 20) / 50;
-          const targetX = ball.x + (deltaX * (0.8 + curveFactor));
-          const targetY = goalY + (goalHeight / 2) + (deltaY * 0.1);
-          const speed = Math.max(280, 750 - ((player ? player.power : 20) * 4));
-
-          if (level >= 3) {
-            wallGroup.forEach(defender => {
-              scene.tweens.add({
-                targets: defender,
-                y: defender.y - 22,
-                duration: 200,
-                yoyo: true,
-                ease: 'Sine.easeOut'
-              });
-            });
-          }
-
-          scene.tweens.add({
-            targets: ball,
-            x: targetX,
-            y: targetY,
-            scale: 0.45,
-            duration: speed,
-            ease: 'Power1.out',
-            onUpdate: () => {
-              ballShadow.x = ball.x;
-              ballShadow.scaleX = ball.scaleX;
-            },
-            onComplete: () => {
-              evaluateShot(scene, targetX, targetY, width, height);
-            }
-          });
-        }
-      });
-    }
-
-    function updateScene() {
-      if (level >= 4 && wallGroup.length > 0 && !isGameOver) {
-        wallGroup.forEach(defender => {
-          defender.x += Math.sin(this.time.now / 250) * 1.5;
-        });
-      }
-    }
-
-    function spawnWall(scene, currentLevel, width, height) {
-      wallGroup.forEach(d => d.destroy());
-      wallGroup = [];
-
-      if (currentLevel === 1) return;
-
-      const numDefenders = currentLevel === 2 ? 2 : currentLevel === 3 ? 3 : 4;
-      const wallY = height * 0.52;
-      const startWallX = (width / 2) - ((numDefenders - 1) * 22) / 2;
-
-      for (let i = 0; i < numDefenders; i++) {
-        const defender = scene.add.container(startWallX + (i * 22), wallY);
-        const body = scene.add.rectangle(0, 0, 16, 36, 0x1e293b);
-        const shirtBorder = scene.add.rectangle(0, -10, 16, 4, 0xeab308);
-        const head = scene.add.circle(0, -22, 7, 0xfbd23c);
-
-        defender.add([body, shirtBorder, head]);
-        wallGroup.push(defender);
-      }
-    }
-
-    function evaluateShot(scene, targetX, targetY, width, height) {
-      const inGoalX = targetX >= goalX && targetX <= (goalX + goalWidth);
-      const inGoalY = targetY >= goalY && targetY <= (goalY + goalHeight);
-
-      let hitWall = false;
-      wallGroup.forEach(d => {
-        if (Math.abs(ball.x - d.x) < 18 && Math.abs(ball.y - d.y) < 30) {
-          hitWall = true;
-        }
-      });
-
-      if (hitWall || !inGoalX || !inGoalY) {
-        lives -= 1;
-        streak = 0;
-        const hearts = '❤️'.repeat(Math.max(0, lives));
-        livesText.setText(`VIDAS: ${hearts}`);
-
-        showFeedback(scene, hitWall ? '¡BARRERA!' : '¡FUERA!', '#ef4444');
-
-        if (lives <= 0) {
-          triggerGameOver(scene, width, height, '¡SIN VIDAS!');
-          return;
-        }
-      } else {
-        const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && (targetY < goalY + 30);
-        
-        streak += 1;
-        totalGoals += 1;
-        if (streak > maxStreak) maxStreak = streak;
-
-        const points = isCorner ? 250 * streak : 100 * streak;
-        score += points;
-
-        showFeedback(scene, isCorner ? '¡ESCUADRA!' : '¡GOOOL!', '#22c55e');
-
-        // Subir de Nivel cada 2 goles
-        const newLevel = Math.min(5, 1 + Math.floor(totalGoals / 2));
-        if (newLevel !== level) {
-          level = newLevel;
-          showFeedback(scene, `¡NIVEL ${level}!`, '#3b82f6');
-          spawnWall(scene, level, width, height);
-        }
-      }
-
-      scoreText.setText(`PTS: ${score}`);
-      levelText.setText(`NIVEL: ${level}`);
-
-      scene.time.delayedCall(700, () => {
-        if (isGameOver) return;
-        ball.setPosition(width / 2, height - 110);
-        ball.setScale(1);
-        ballShadow.setPosition(width / 2, height - 98);
-        ballShadow.setScale(1);
-        isShooting = false;
-      });
-    }
-
-    function triggerGameOver(scene, width, height, reason) {
-      isGameOver = true;
-      if (timerEvent) timerEvent.remove();
-
-      const overlay = scene.add.graphics();
-      overlay.fillStyle(0x0a0f1d, 0.90);
-      overlay.fillRect(0, 0, width, height);
-
-      scene.add.text(width / 2, height * 0.28, reason, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '24px', color: '#ef4444', fontStyle: 'bold'
-      }).setOrigin(0.5);
-
-      scene.add.text(width / 2, height * 0.38, `PUNTAJE FINAL: ${score}`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '18px', color: '#eab308', fontStyle: 'bold'
-      }).setOrigin(0.5);
-
-      scene.add.text(width / 2, height * 0.44, `GOLES TOTALES: ${totalGoals}`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '13px', color: '#f8fafc'
-      }).setOrigin(0.5);
-
-      const expGained = Math.floor(score / 10);
-      scene.add.text(width / 2, height * 0.50, `EXP GANADA: +${expGained} PTS`, {
-        fontFamily: 'Chakra Petch, sans-serif', fontSize: '14px', color: '#22c55e', fontStyle: 'bold'
-      }).setOrigin(0.5);
-    }
-
-    function showFeedback(scene, text, color) {
-      feedbackText.setText(text);
-      feedbackText.setColor(color);
-      scene.tweens.add({
-        targets: feedbackText,
-        scale: { from: 0.5, to: 1 },
-        alpha: { from: 1, to: 0 },
-        duration: 800,
-        ease: 'Power1.out'
-      });
-    }
-
-    return () => {
-      if (gameRef.current) {
-        gameRef.current.destroy(true);
-      }
-    };
-  }, [player]);
+export default function App() {
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <button
-        onClick={onExit}
-        style={{
-          position: 'absolute',
-          top: '12px',
-          right: '12px',
-          zIndex: 10,
-          backgroundColor: '#1e293b',
-          color: '#eab308',
-          border: '1px solid #eab308',
-          borderRadius: '6px',
-          padding: '6px 12px',
-          fontSize: '11px',
-          fontWeight: '700',
-          fontFamily: 'Chakra Petch, sans-serif'
-        }}
-      >
-        SALIR AL MENU
-      </button>
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#0a0f1d',
+      color: '#f8fafc',
+      fontFamily: "'Chakra Petch', sans-serif",
+      padding: isPlaying ? '0' : '12px 16px',
+      boxSizing: 'border-box'
+    }}>
+      <PWAInstallPrompt />
 
-      <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
+      {isPlaying ? (
+        <GameCanvas 
+          player={selectedPlayer} 
+          onExit={() => setIsPlaying(false)} 
+        />
+      ) : (
+        <>
+          <header style={{
+            textAlign: 'center',
+            marginBottom: '16px',
+            borderBottom: '1px solid #eab308',
+            paddingBottom: '8px'
+          }}>
+            <h1 style={{
+              fontSize: '18px',
+              fontWeight: '700',
+              color: '#eab308',
+              margin: 0,
+              letterSpacing: '1px',
+              textTransform: 'uppercase'
+            }}>
+              CJ PROM '07 STRIKERS
+            </h1>
+            <p style={{ fontSize: '10px', color: '#64748b', margin: '2px 0 0 0', textTransform: 'uppercase' }}>
+              Nadie es más fuerte que todos juntos
+            </p>
+          </header>
+
+          {!selectedPlayer ? (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase' }}>
+                  Plantel Oficial
+                </span>
+                <span style={{ fontSize: '10px', backgroundColor: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#eab308' }}>
+                  {ROSTER_PROM07.length} Jugadores
+                </span>
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px'
+              }}>
+                {ROSTER_PROM07.map((player) => (
+                  <div
+                    key={player.number}
+                    onClick={() => setSelectedPlayer(player)}
+                    style={{
+                      backgroundColor: '#111827',
+                      border: '1px solid #1e293b',
+                      borderRadius: '6px',
+                      padding: '8px 4px',
+                      textAlign: 'center',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#eab308' }}>#{player.number}</div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {player.name}
+                    </div>
+                    <div style={{ fontSize: '9px', color: '#64748b', fontWeight: '500' }}>{player.pos}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              maxWidth: '360px',
+              margin: '0 auto',
+              backgroundColor: '#111827',
+              borderRadius: '10px',
+              padding: '16px',
+              border: '1px solid #eab308'
+            }}>
+              <button
+                onClick={() => setSelectedPlayer(null)}
+                style={{
+                  backgroundColor: '#1e293b',
+                  color: '#eab308',
+                  border: '1px solid #334155',
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  marginBottom: '12px'
+                }}
+              >
+                ← VOLVER AL ROSTER
+              </button>
+
+              <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                <span style={{ fontSize: '28px', fontWeight: '700', color: '#eab308', lineHeight: 1 }}>
+                  #{selectedPlayer.number}
+                </span>
+                <h2 style={{ fontSize: '18px', margin: '2px 0 4px 0', textTransform: 'uppercase' }}>
+                  {selectedPlayer.name}
+                </h2>
+                <span style={{
+                  backgroundColor: '#1e293b',
+                  color: '#94a3b8',
+                  padding: '2px 6px',
+                  borderRadius: '3px',
+                  fontSize: '10px',
+                  fontWeight: '700'
+                }}>
+                  {selectedPlayer.pos}
+                </span>
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '8px',
+                backgroundColor: '#0a0f1d',
+                padding: '8px',
+                borderRadius: '6px',
+                marginBottom: '12px',
+                border: '1px solid #1e293b'
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '9px', color: '#64748b' }}>NIVEL</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#eab308' }}>{selectedPlayer.level}</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '9px', color: '#64748b' }}>SKILL POINTS</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e' }}>{selectedPlayer.skillPoints} SP</div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>
+                Atributos Iniciales
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
+                    <span>POTENCIA</span>
+                    <span style={{ color: '#eab308' }}>{selectedPlayer.power} / 99</span>
+                  </div>
+                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
+                    <div style={{ width: `${selectedPlayer.power}%`, backgroundColor: '#eab308', height: '100%', borderRadius: '2px' }}></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
+                    <span>ROSCA / CURVA</span>
+                    <span style={{ color: '#3b82f6' }}>{selectedPlayer.curve} / 99</span>
+                  </div>
+                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
+                    <div style={{ width: `${selectedPlayer.curve}%`, backgroundColor: '#3b82f6', height: '100%', borderRadius: '2px' }}></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
+                    <span>PUNTERÍA</span>
+                    <span style={{ color: '#22c55e' }}>{selectedPlayer.accuracy} / 99</span>
+                  </div>
+                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
+                    <div style={{ width: `${selectedPlayer.accuracy}%`, backgroundColor: '#22c55e', height: '100%', borderRadius: '2px' }}></div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsPlaying(true)}
+                style={{
+                  width: '100%',
+                  marginTop: '16px',
+                  backgroundColor: '#eab308',
+                  color: '#0a0f1d',
+                  fontWeight: '700',
+                  fontFamily: "'Chakra Petch', sans-serif",
+                  border: 'none',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase'
+                }}
+              >
+                ENTRAR A LA CANCHA
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
