@@ -9,6 +9,8 @@ export default function GameCanvas({ player, onExit }) {
   const [lives, setLives] = useState(3);
   const [timeLeft, setTimeLeft] = useState(60);
   const [feedback, setFeedback] = useState('');
+  const [power, setPower] = useState(0);
+  const [isCharging, setIsCharging] = useState(false);
   const [gameOverData, setGameOverData] = useState(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function GameCanvas({ player, onExit }) {
     const game = new Phaser.Game(config);
     gameRef.current = game;
 
-    let ball, ballShadow, keeper, keeperBody;
+    let ball, ballShadow, keeper, aimTarget;
     let goalX, goalY, goalWidth, goalHeight;
     let wallGroup = [];
     let trailGraphics;
@@ -39,7 +41,10 @@ export default function GameCanvas({ player, onExit }) {
     let currentTime = 60;
     let timerEvent;
 
-    let startX, startY, startTime;
+    let targetAimX, targetAimY;
+    let powerValue = 0;
+    let powerIncreasing = true;
+    let powerInterval = null;
     let isShooting = false;
     let isGameOver = false;
 
@@ -48,7 +53,7 @@ export default function GameCanvas({ player, onExit }) {
       const width = scene.cameras.main.width;
       const height = scene.cameras.main.height;
 
-      // CAMPO Y PERSPECTIVA
+      // CAMPO
       const bg = scene.add.graphics();
       bg.fillStyle(0x0f172a, 1);
       bg.fillRect(0, 0, width, height * 0.25);
@@ -59,11 +64,14 @@ export default function GameCanvas({ player, onExit }) {
         bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
 
-      // PORTERÍA
-      goalWidth = Math.min(width * 0.72, 320);
+      // PORTERÍA 2.5D
+      goalWidth = Math.min(width * 0.75, 320);
       goalHeight = 90;
       goalX = (width - goalWidth) / 2;
       goalY = height * 0.22;
+
+      targetAimX = width / 2;
+      targetAimY = goalY + goalHeight / 2;
 
       const net = scene.add.graphics();
       net.lineStyle(1, 0xffffff, 0.25);
@@ -75,16 +83,20 @@ export default function GameCanvas({ player, onExit }) {
       }
 
       const posts = scene.add.graphics();
-      posts.lineStyle(6, 0xffffff, 1);
+      posts.lineStyle(5, 0xffffff, 1);
       posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
+
+      // RETÍCULA DE APUNTADO (AIM TARGET)
+      aimTarget = scene.add.circle(targetAimX, targetAimY, 12, 0xeab308, 0.6);
+      scene.add.circle(targetAimX, targetAimY, 4, 0xffffff);
 
       // PORTERO ORSINI (#94)
       keeper = scene.add.container(width / 2, goalY + goalHeight - 15);
-      keeperBody = scene.add.rectangle(0, -12, 16, 28, 0xeab308);
+      const keeperBody = scene.add.rectangle(0, -12, 16, 28, 0xeab308);
       const keeperHead = scene.add.circle(0, -26, 6, 0xfbd23c);
       keeper.add([keeperBody, keeperHead]);
 
-      // BALÓN Y SOMBRA
+      // BALÓN
       const startXPos = width / 2;
       const startYPos = height - 110;
 
@@ -100,7 +112,7 @@ export default function GameCanvas({ player, onExit }) {
 
       spawnWall(scene, currentLevel, width, height);
 
-      // RELOJ FIJO DE 60 SEGUNDOS
+      // TIMER FIJO DE 60s
       timerEvent = scene.time.addEvent({
         delay: 1000,
         callback: () => {
@@ -116,114 +128,118 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // CONTROLES DE TIRO (SWIPE DINÁMICO)
-      scene.input.on('pointerdown', (pointer) => {
-        if (isShooting || isGameOver) return;
-        startX = pointer.x;
-        startY = pointer.y;
-        startTime = pointer.time;
+      // MECÁNICA AIM + HOLD FOR POWER + RELEASE
+      scene.input.on('pointermove', (pointer) => {
+        if (isShooting || isGameOver || isCharging) return;
+        // Ajustar mira dentro del arco
+        targetAimX = Phaser.Math.Clamp(pointer.x, goalX + 10, goalX + goalWidth - 10);
+        targetAimY = Phaser.Math.Clamp(pointer.y, goalY + 10, goalY + goalHeight - 10);
+        aimTarget.setPosition(targetAimX, targetAimY);
       });
 
-      scene.input.on('pointerup', (pointer) => {
-        if (isShooting || isGameOver || !startX) return;
+      scene.input.on('pointerdown', () => {
+        if (isShooting || isGameOver) return;
+        setIsCharging(true);
+        powerValue = 10;
+        powerIncreasing = true;
 
-        const duration = Math.max(60, pointer.time - startTime);
-        const deltaX = pointer.x - startX;
-        const deltaY = pointer.y - startY;
-        const swipeDistanceY = Math.abs(deltaY);
-
-        if (deltaY < -20) {
-          isShooting = true;
-
-          // 1. CALCULO DE ALTURA FLEXIBLE SEGÚN LONGITUD DEL SWIPE
-          let targetY;
-          let shotTypeLabel = '';
-
-          if (swipeDistanceY < 70) {
-            // Tiro Raso (al piso)
-            targetY = goalY + goalHeight - 10;
-            shotTypeLabel = 'TIRO RASO';
-          } else if (swipeDistanceY < 150) {
-            // Media Altura
-            targetY = goalY + (goalHeight / 2);
-            shotTypeLabel = 'MEDIA ALTURA';
+        powerInterval = setInterval(() => {
+          if (powerIncreasing) {
+            powerValue += 5;
+            if (powerValue >= 100) powerIncreasing = false;
           } else {
-            // Ámbolo / Escuadra (Arriba)
-            targetY = goalY + 15;
-            shotTypeLabel = 'AL ÁNGULO';
+            powerValue -= 5;
+            if (powerValue <= 10) powerIncreasing = true;
           }
+          setPower(powerValue);
+        }, 30);
+      });
 
-          // 2. CALCULO DE VELOCIDAD Y CURVA
-          const powerStat = player ? player.power : 20;
-          const curveStat = player ? player.curve : 20;
-          const swipeVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / duration;
-          const shotSpeed = Phaser.Math.Clamp(650 - (swipeVelocity * 90) - (powerStat * 2), 320, 580);
+      scene.input.on('pointerup', () => {
+        if (!isCharging || isShooting || isGameOver) return;
+        clearInterval(powerInterval);
+        setIsCharging(false);
+        isShooting = true;
 
-          const controlX = ball.x + (deltaX * (0.8 + curveStat / 50));
-          const controlY = height * 0.48;
-          const targetX = Phaser.Math.Clamp(ball.x + deltaX * 1.1, goalX - 15, goalX + goalWidth + 15);
+        executeShot(scene, targetAimX, targetAimY, powerValue, width, height, startXPos, startYPos);
+      });
+    }
 
-          // 3. REACCIÓN DE ORSINI
-          const isCornerShot = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35);
-          const keeperSpeed = isCornerShot ? 0.4 : 0.65;
-          const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 18, goalX + goalWidth - 18);
+    function executeShot(scene, tx, ty, pValue, width, height, startXPos, startYPos) {
+      // Cálculo de Altura según Potencia
+      // Potencia baja = Tiro Raso, Potencia media = Media Altura, Potencia alta = Ángulo
+      let finalY = goalY + goalHeight - 10; // Raso por defecto
+      if (pValue > 40 && pValue <= 75) {
+        finalY = goalY + (goalHeight / 2); // Media altura
+      } else if (pValue > 75) {
+        finalY = goalY + 15; // Ángulo
+      }
 
-          scene.tweens.add({
-            targets: keeper,
-            x: keeperTargetX,
-            duration: shotSpeed / keeperSpeed,
-            ease: 'Power1.out'
-          });
+      const powerStat = player ? player.power : 20;
+      const curveStat = player ? player.curve : 20;
+      const shotSpeed = Phaser.Math.Clamp(600 - (pValue * 2) - (powerStat * 2), 300, 550);
 
-          // Animación del Disparo
-          let progress = 0;
-          let hasCollided = false;
+      const controlX = startXPos + ((tx - startXPos) * (1 + curveStat / 80));
+      const controlY = height * 0.48;
 
-          scene.tweens.add({
-            targets: { t: 0 },
-            t: 1,
-            duration: shotSpeed,
-            ease: 'Power1.out',
-            onUpdate: (tween, target) => {
-              if (hasCollided) return;
+      // Movimiento del Portero
+      const isCorner = (tx < goalX + 35 || tx > goalX + goalWidth - 35);
+      const keeperSpeed = isCorner ? 0.45 : 0.7;
+      const keeperTargetX = Phaser.Math.Clamp(tx, goalX + 18, goalX + goalWidth - 18);
 
-              progress = target.t;
-              const px = Phaser.Math.Interpolation.QuadraticBezier(progress, startXPos, controlX, targetX);
-              const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, targetY);
+      scene.tweens.add({
+        targets: keeper,
+        x: keeperTargetX,
+        duration: shotSpeed / keeperSpeed,
+        ease: 'Power1.out'
+      });
 
-              ball.setPosition(px, py);
-              ball.setScale(1 - progress * 0.55);
-              ballShadow.setPosition(px, py + 12 * (1 - progress));
-              ballShadow.setScale(1 - progress * 0.55);
+      let progress = 0;
+      let hasCollided = false;
 
+      scene.tweens.add({
+        targets: { t: 0 },
+        t: 1,
+        duration: shotSpeed,
+        ease: 'Power1.out',
+        onUpdate: (tween, target) => {
+          if (hasCollided) return;
+
+          progress = target.t;
+          const px = Phaser.Math.Interpolation.QuadraticBezier(progress, startXPos, controlX, tx);
+          const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, finalY);
+
+          ball.setPosition(px, py);
+          ball.setScale(1 - progress * 0.55);
+          ballShadow.setPosition(px, py + 12 * (1 - progress));
+
+          trailGraphics.clear();
+          trailGraphics.lineStyle(3, 0xeab308, 0.6);
+          trailGraphics.lineBetween(startXPos, startYPos, px, py);
+
+          // Colisión Barrera
+          wallGroup.forEach(d => {
+            if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
+              hasCollided = true;
+              tween.stop();
               trailGraphics.clear();
-              trailGraphics.lineStyle(3, 0xeab308, 0.6);
-              trailGraphics.lineBetween(startXPos, startYPos, px, py);
-
-              // COLISIONES
-              wallGroup.forEach(d => {
-                if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
-                  hasCollided = true;
-                  tween.stop();
-                  trailGraphics.clear();
-                  handleCollision(scene, '¡EN LA BARRERA!');
-                }
-              });
-
-              if (!hasCollided && Math.abs(px - keeper.x) < 14 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
-                hasCollided = true;
-                tween.stop();
-                trailGraphics.clear();
-                handleCollision(scene, '¡ATAJÓ ORSINI!');
-              }
-            },
-            onComplete: () => {
-              if (!hasCollided) {
-                trailGraphics.clear();
-                evaluateShot(scene, targetX, targetY, width, height, shotTypeLabel);
-              }
+              handleCollision(scene, 'BARRERA!');
             }
           });
+
+          // Colisión Portero
+          if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
+            hasCollided = true;
+            tween.stop();
+            trailGraphics.clear();
+            handleCollision(scene, 'TAPÓ!');
+          }
+        },
+        onComplete: () => {
+          if (!hasCollided) {
+            trailGraphics.clear();
+            evaluateShot(scene, tx, finalY, width, height);
+          }
         }
       });
     }
@@ -269,12 +285,12 @@ export default function GameCanvas({ player, onExit }) {
       }
     }
 
-    function evaluateShot(scene, targetX, targetY, width, height, shotTypeLabel) {
+    function evaluateShot(scene, targetX, targetY, width, height) {
       const inGoalX = targetX >= goalX && targetX <= goalX + goalWidth;
       const inGoalY = targetY >= goalY && targetY <= goalY + goalHeight;
 
       if (!inGoalX || !inGoalY) {
-        handleCollision(scene, '¡FUERA!');
+        handleCollision(scene, 'FUERA!');
       } else {
         totalGoals += 1;
         const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && targetY < goalY + 30;
@@ -282,7 +298,7 @@ export default function GameCanvas({ player, onExit }) {
         currentScore += pts;
         setScore(currentScore);
 
-        triggerFeedback(`${isCorner ? '¡ESCUADRA!' : '¡GOOOL!'} (${shotTypeLabel})`);
+        triggerFeedback(isCorner ? 'ESCUADRA!' : 'GOL!');
 
         const newLvl = Math.min(5, 1 + Math.floor(totalGoals / 2));
         if (newLvl !== currentLevel) {
@@ -299,20 +315,21 @@ export default function GameCanvas({ player, onExit }) {
       const width = scene.cameras.main.width;
       const height = scene.cameras.main.height;
 
-      scene.time.delayedCall(700, () => {
+      scene.time.delayedCall(600, () => {
         if (isGameOver) return;
         ball.setPosition(width / 2, height - 110);
         ball.setScale(1);
         ballShadow.setPosition(width / 2, height - 98);
         ballShadow.setScale(1);
         keeper.setPosition(width / 2, goalY + goalHeight - 15);
+        setPower(0);
         isShooting = false;
       });
     }
 
     function triggerFeedback(text) {
       setFeedback(text);
-      setTimeout(() => setFeedback(''), 900);
+      setTimeout(() => setFeedback(''), 400); // 0.4s súper rápido e inobstrusivo
     }
 
     function triggerGameOver(reason) {
@@ -332,26 +349,30 @@ export default function GameCanvas({ player, onExit }) {
 
   return (
     <div style={{
-      position: 'relative',
+      position: 'fixed',
+      inset: 0,
       width: '100vw',
       height: '100vh',
+      backgroundColor: '#0a0f1d',
       overflow: 'hidden',
       touchAction: 'none',
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD HTML FIX SUPREMO - Z-INDEX 9999 */}
+      {/* HUD UNIVERSAL CON SAFARI/IOS SAFE AREA FIX */}
       <div style={{
         position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
-        height: '44px',
-        padding: '0 12px',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)',
+        paddingBottom: '8px',
+        paddingLeft: '12px',
+        paddingRight: '12px',
         display: 'flex',
         justify: 'space-between',
         alignItems: 'center',
-        zIndex: 9999,
+        zIndex: 999999,
         backgroundColor: '#0f172a',
         borderBottom: '2px solid #eab308',
         boxSizing: 'border-box'
@@ -385,30 +406,49 @@ export default function GameCanvas({ player, onExit }) {
         </button>
       </div>
 
-      {/* FEEDBACK CENTRAL */}
+      {/* BARRA DE POTENCIA TIPO ARCADE EN LA PARTE INFERIOR */}
+      {isCharging && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '200px',
+          height: '12px',
+          backgroundColor: '#1e293b',
+          border: '2px solid #eab308',
+          borderRadius: '6px',
+          zIndex: 99999,
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            width: `${power}%`,
+            height: '100%',
+            backgroundColor: power > 75 ? '#ef4444' : power > 40 ? '#eab308' : '#22c55e',
+            transition: 'width 0.03s linear'
+          }} />
+        </div>
+      )}
+
+      {/* FEEDBACK MÍNIMO E INVASIVIDAD CERO */}
       {feedback && (
         <div style={{
           position: 'fixed',
-          top: '40%',
+          top: '35%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          fontSize: '20px',
+          fontSize: '22px',
           fontWeight: 'bold',
           color: '#eab308',
-          zIndex: 9999,
-          textShadow: '0 2px 8px rgba(0,0,0,0.9)',
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          padding: '8px 16px',
-          borderRadius: '8px',
-          border: '1px solid #eab308',
-          textAlign: 'center'
+          zIndex: 999999,
+          textShadow: '0 2px 6px rgba(0,0,0,0.9)'
         }}>
           {feedback}
         </div>
       )}
 
-      {/* CANVAS DEL JUEGO */}
-      <div id="phaser-game-container" style={{ width: '100%', height: '100%', paddingTop: '44px', boxSizing: 'border-box' }} />
+      {/* LIENZO DE PHASER */}
+      <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
 
       {/* GAMEOVER MODAL */}
       {gameOverData && (
@@ -421,7 +461,7 @@ export default function GameCanvas({ player, onExit }) {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '20px',
-          zIndex: 99999
+          zIndex: 999999
         }}>
           <h2 style={{ fontSize: '24px', color: '#ef4444', margin: '0 0 12px 0', textTransform: 'uppercase' }}>
             {gameOverData.reason}
