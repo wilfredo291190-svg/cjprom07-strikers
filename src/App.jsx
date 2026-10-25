@@ -4,8 +4,56 @@ import GameCanvas from './components/GameCanvas';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 
 export default function App() {
+  const [roster, setRoster] = useState(ROSTER_PROM07);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Función para gastar Skill Points en stats
+  const upgradeStat = (playerNumber, statKey) => {
+    setRoster(prevRoster => prevRoster.map(player => {
+      if (player.number === playerNumber && player.skillPoints > 0 && player[statKey] < 99) {
+        return {
+          ...player,
+          [statKey]: player[statKey] + 1,
+          skillPoints: player.skillPoints - 1
+        };
+      }
+      return player;
+    }));
+
+    if (selectedPlayer && selectedPlayer.number === playerNumber) {
+      setSelectedPlayer(prev => ({
+        ...prev,
+        [statKey]: prev[statKey] + 1,
+        skillPoints: prev.skillPoints - 1
+      }));
+    }
+  };
+
+  // Función al terminar partida para sumar EXP y Skill Points
+  const handleGameOver = (expGained) => {
+    if (!selectedPlayer) return;
+
+    setRoster(prevRoster => prevRoster.map(player => {
+      if (player.number === selectedPlayer.number) {
+        const newExp = player.exp + expGained;
+        const newLevel = 1 + Math.floor(newExp / 500);
+        const addedSp = newLevel > player.level ? (newLevel - player.level) * 3 : 0;
+
+        const updated = {
+          ...player,
+          exp: newExp,
+          level: newLevel,
+          skillPoints: player.skillPoints + addedSp
+        };
+        setSelectedPlayer(updated);
+        return updated;
+      }
+      return player;
+    }));
+
+    setIsPlaying(false);
+  };
 
   return (
     <div style={{
@@ -14,14 +62,16 @@ export default function App() {
       color: '#f8fafc',
       fontFamily: "'Chakra Petch', sans-serif",
       padding: isPlaying ? '0' : '12px 16px',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      touchAction: 'none',
+      userSelect: 'none'
     }}>
       <PWAInstallPrompt />
 
       {isPlaying ? (
         <GameCanvas 
           player={selectedPlayer} 
-          onExit={() => setIsPlaying(false)} 
+          onExit={handleGameOver} 
         />
       ) : (
         <>
@@ -53,7 +103,7 @@ export default function App() {
                   Plantel Oficial
                 </span>
                 <span style={{ fontSize: '10px', backgroundColor: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#eab308' }}>
-                  {ROSTER_PROM07.length} Jugadores
+                  {roster.length} Jugadores
                 </span>
               </div>
 
@@ -62,7 +112,7 @@ export default function App() {
                 gridTemplateColumns: 'repeat(3, 1fr)',
                 gap: '8px'
               }}>
-                {ROSTER_PROM07.map((player) => (
+                {roster.map((player) => (
                   <div
                     key={player.number}
                     onClick={() => setSelectedPlayer(player)}
@@ -150,37 +200,70 @@ export default function App() {
               </div>
 
               <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>
-                Atributos Iniciales
+                MEJORAR ATRIBUTOS
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Potencia */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>POTENCIA</span>
                     <span style={{ color: '#eab308' }}>{selectedPlayer.power} / 99</span>
                   </div>
-                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
-                    <div style={{ width: `${selectedPlayer.power}%`, backgroundColor: '#eab308', height: '100%', borderRadius: '2px' }}></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
+                      <div style={{ width: `${selectedPlayer.power}%`, backgroundColor: '#eab308', height: '100%', borderRadius: '3px' }}></div>
+                    </div>
+                    {selectedPlayer.skillPoints > 0 && (
+                      <button
+                        onClick={() => upgradeStat(selectedPlayer.number, 'power')}
+                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        +1
+                      </button>
+                    )}
                   </div>
                 </div>
 
+                {/* Rosca */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>ROSCA / CURVA</span>
                     <span style={{ color: '#3b82f6' }}>{selectedPlayer.curve} / 99</span>
                   </div>
-                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
-                    <div style={{ width: `${selectedPlayer.curve}%`, backgroundColor: '#3b82f6', height: '100%', borderRadius: '2px' }}></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
+                      <div style={{ width: `${selectedPlayer.curve}%`, backgroundColor: '#3b82f6', height: '100%', borderRadius: '3px' }}></div>
+                    </div>
+                    {selectedPlayer.skillPoints > 0 && (
+                      <button
+                        onClick={() => upgradeStat(selectedPlayer.number, 'curve')}
+                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        +1
+                      </button>
+                    )}
                   </div>
                 </div>
 
+                {/* Puntería */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '2px' }}>
                     <span>PUNTERÍA</span>
                     <span style={{ color: '#22c55e' }}>{selectedPlayer.accuracy} / 99</span>
                   </div>
-                  <div style={{ width: '100%', backgroundColor: '#1e293b', height: '4px', borderRadius: '2px' }}>
-                    <div style={{ width: `${selectedPlayer.accuracy}%`, backgroundColor: '#22c55e', height: '100%', borderRadius: '2px' }}></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ flex: 1, backgroundColor: '#1e293b', height: '6px', borderRadius: '3px' }}>
+                      <div style={{ width: `${selectedPlayer.accuracy}%`, backgroundColor: '#22c55e', height: '100%', borderRadius: '3px' }}></div>
+                    </div>
+                    {selectedPlayer.skillPoints > 0 && (
+                      <button
+                        onClick={() => upgradeStat(selectedPlayer.number, 'accuracy')}
+                        style={{ backgroundColor: '#22c55e', color: '#0a0f1d', border: 'none', borderRadius: '4px', fontWeight: 'bold', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        +1
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
