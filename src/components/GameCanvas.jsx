@@ -10,8 +10,6 @@ export default function GameCanvas({ player, onExit }) {
   const [lives, setLives] = useState(3);
   const [timeLeft, setTimeLeft] = useState(60);
   const [feedback, setFeedback] = useState('');
-  const [power, setPower] = useState(0);
-  const [isCharging, setIsCharging] = useState(false);
   const [gameOverData, setGameOverData] = useState(null);
 
   useEffect(() => {
@@ -30,10 +28,10 @@ export default function GameCanvas({ player, onExit }) {
     const game = new Phaser.Game(config);
     gameRef.current = game;
 
-    let ball, ballShadow, keeper, aimTarget;
+    let ball, ballShadow, keeper;
     let goalX, goalY, goalWidth, goalHeight;
     let wallGroup = [];
-    let trailGraphics;
+    let trailGraphics, curvePreviewGraphics;
 
     let currentScore = 0;
     let currentLives = 3;
@@ -42,10 +40,8 @@ export default function GameCanvas({ player, onExit }) {
     let currentTime = 60;
     let timerEvent;
 
-    let targetAimX, targetAimY;
-    let powerValue = 0;
-    let powerIncreasing = true;
-    let powerInterval = null;
+    let swipePoints = [];
+    let isDrawingCurve = false;
     let isShooting = false;
     let isGameOver = false;
 
@@ -54,42 +50,38 @@ export default function GameCanvas({ player, onExit }) {
       const width = scene.cameras.main.width;
       const height = scene.cameras.main.height;
 
-      // Silbato de Inicio
       sfx.playWhistle();
 
-      // 1. ILUSTRACIÓN DEL CAMPO Y ESTADIO NOCTURNO
+      // 1. ESTADIO Y CAMPO 2.5D
       const bg = scene.add.graphics();
       bg.fillStyle(0x0f172a, 1);
       bg.fillRect(0, 0, width, height * 0.25);
 
-      // Reflectores de Estadio (Luz)
-      bg.fillStyle(0xfde047, 0.15);
-      bg.fillTriangle(0, 0, width * 0.4, height * 0.25, 0, height * 0.25);
-      bg.fillTriangle(width, 0, width * 0.6, height * 0.25, width, height * 0.25);
+      // Reflectores
+      bg.fillStyle(0xfde047, 0.12);
+      bg.fillTriangle(0, 0, width * 0.45, height * 0.25, 0, height * 0.25);
+      bg.fillTriangle(width, 0, width * 0.55, height * 0.25, width, height * 0.25);
 
-      // Césped con Degradado y Franjas
+      // Césped
       const stripeHeight = (height * 0.75) / 6;
       for (let i = 0; i < 6; i++) {
         bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
         bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
 
-      // Líneas de Campo en Perspectiva
-      bg.lineStyle(2, 0xffffff, 0.4);
-      bg.strokeLineShape(new Phaser.Geom.Line(width * 0.1, height * 0.4, width * 0.9, height * 0.4));
+      // Línea de área
+      bg.lineStyle(2, 0xffffff, 0.3);
+      bg.strokeLineShape(new Phaser.Geom.Line(width * 0.08, height * 0.42, width * 0.92, height * 0.42));
 
-      // 2. PORTERÍA 2.5D
+      // 2. PORTERÍA CON PERSPECTIVA
       goalWidth = Math.min(width * 0.75, 320);
       goalHeight = 90;
       goalX = (width - goalWidth) / 2;
-      goalY = height * 0.25;
+      goalY = height * 0.23;
 
-      targetAimX = width / 2;
-      targetAimY = goalY + goalHeight / 2;
-
-      // Red Detallada
+      // Red
       const net = scene.add.graphics();
-      net.lineStyle(1, 0xe2e8f0, 0.3);
+      net.lineStyle(1, 0xe2e8f0, 0.25);
       for (let x = goalX; x <= goalX + goalWidth; x += 10) {
         net.lineBetween(x, goalY, x, goalY + goalHeight);
       }
@@ -97,30 +89,29 @@ export default function GameCanvas({ player, onExit }) {
         net.lineBetween(goalX, y, goalX + goalWidth, y);
       }
 
-      // Marco (Postes Blancos con Sombra)
+      // Postes
       const posts = scene.add.graphics();
       posts.lineStyle(6, 0xffffff, 1);
       posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
 
-      // RETÍCULA DE APUNTADO
-      aimTarget = scene.add.container(targetAimX, targetAimY);
-      const aimOuter = scene.add.circle(0, 0, 14, 0xeab308, 0.4);
-      const aimBorder = scene.add.circle(0, 0, 14).setStrokeStyle(2, 0xeab308);
-      const aimInner = scene.add.circle(0, 0, 4, 0xffffff);
-      aimTarget.add([aimOuter, aimBorder, aimInner]);
-
-      // PORTERO ORSINI (#94) - UNIFORME OFICIAL
-      keeper = scene.add.container(width / 2, goalY + goalHeight - 15);
-      const keeperBody = scene.add.rectangle(0, -12, 18, 30, 0xeab308); // Camiseta Dorada
-      const keeperShorts = scene.add.rectangle(0, 2, 18, 10, 0x0f172a); // Pantalón Negro
-      const keeperHead = scene.add.circle(0, -28, 7, 0xfbd23c);
-      const keeperNum = scene.add.text(0, -14, '94', {
+      // 3. PORTERO ORSINI (#94) CON ANATOMÍA (Brazos, Piernas, Guantes)
+      keeper = scene.add.container(width / 2, goalY + goalHeight - 12);
+      
+      const kLegL = scene.add.rectangle(-6, 8, 5, 16, 0x0f172a);
+      const kLegR = scene.add.rectangle(6, 8, 5, 16, 0x0f172a);
+      const kBody = scene.add.rectangle(0, -8, 18, 22, 0xeab308); // Camiseta Dorada
+      const kArmL = scene.add.rectangle(-12, -10, 5, 16, 0xeab308);
+      const kArmR = scene.add.rectangle(12, -10, 5, 16, 0xeab308);
+      const kGloveL = scene.add.circle(-13, -18, 4, 0xffffff);
+      const kGloveR = scene.add.circle(13, -18, 4, 0xffffff);
+      const kHead = scene.add.circle(0, -22, 7, 0xfbd23c);
+      const kNum = scene.add.text(0, -11, '94', {
         fontFamily: "'Chakra Petch', sans-serif", fontSize: '9px', color: '#0f172a', fontStyle: 'bold'
       }).setOrigin(0.5);
 
-      keeper.add([keeperBody, keeperShorts, keeperHead, keeperNum]);
+      keeper.add([kLegL, kLegR, kBody, kArmL, kArmR, kGloveL, kGloveR, kHead, kNum]);
 
-      // BALÓN OFICIAL HD (Gajos)
+      // 4. BALÓN Y SOMBRA
       const startXPos = width / 2;
       const startYPos = height - 110;
 
@@ -128,12 +119,13 @@ export default function GameCanvas({ player, onExit }) {
 
       ball = scene.add.container(startXPos, startYPos);
       const ballBase = scene.add.circle(0, 0, 14, 0xffffff);
-      const ballPattern1 = scene.add.polygon(0, 0, [0, -6, 5, -2, 3, 4, -3, 4, -5, -2], 0x0f172a);
-      const ballPattern2 = scene.add.circle(-8, -4, 3, 0x0f172a);
-      const ballPattern3 = scene.add.circle(8, -4, 3, 0x0f172a);
-      ball.add([ballBase, ballPattern1, ballPattern2, ballPattern3]);
+      const ballP1 = scene.add.polygon(0, 0, [0, -6, 5, -2, 3, 4, -3, 4, -5, -2], 0x0f172a);
+      const ballP2 = scene.add.circle(-8, -4, 3, 0x0f172a);
+      const ballP3 = scene.add.circle(8, -4, 3, 0x0f172a);
+      ball.add([ballBase, ballP1, ballP2, ballP3]);
 
       trailGraphics = scene.add.graphics();
+      curvePreviewGraphics = scene.add.graphics();
 
       spawnWall(scene, currentLevel, width, height);
 
@@ -153,80 +145,87 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // CONTROLES TÁCTILES
+      // 5. CONTROL TÁCTIL DE DIBUJO DE CURVA LIBRE (FREE-DRAW)
       const container = document.getElementById('phaser-game-container');
-      let chargingState = false;
 
-      const startCharge = (e) => {
-        if (isShooting || isGameOver || chargingState) return;
-        chargingState = true;
-        setIsCharging(true);
-        powerValue = 10;
-        powerIncreasing = true;
-
-        if (powerInterval) clearInterval(powerInterval);
-        powerInterval = setInterval(() => {
-          if (powerIncreasing) {
-            powerValue += 4;
-            if (powerValue >= 100) powerIncreasing = false;
-          } else {
-            powerValue -= 4;
-            if (powerValue <= 10) powerIncreasing = true;
-          }
-          setPower(powerValue);
-        }, 30);
-      };
-
-      const moveAim = (e) => {
+      const startSwipe = (e) => {
         if (isShooting || isGameOver) return;
         const touch = e.touches ? e.touches[0] : e;
         if (!touch) return;
 
-        targetAimX = Phaser.Math.Clamp(touch.clientX, goalX + 10, goalX + goalWidth - 10);
-        targetAimY = Phaser.Math.Clamp(touch.clientY, goalY + 10, goalY + goalHeight - 10);
-        aimTarget.setPosition(targetAimX, targetAimY);
+        swipePoints = [{ x: touch.clientX, y: touch.clientY }];
+        isDrawingCurve = true;
       };
 
-      const releaseShot = () => {
-        if (!chargingState || isShooting || isGameOver) return;
-        chargingState = false;
-        clearInterval(powerInterval);
-        setIsCharging(false);
-        isShooting = true;
+      const moveSwipe = (e) => {
+        if (!isDrawingCurve || isShooting || isGameOver) return;
+        const touch = e.touches ? e.touches[0] : e;
+        if (!touch) return;
 
-        sfx.playKick(); // Sonido de Patada
-        executeShot(scene, targetAimX, targetAimY, powerValue, width, height, startXPos, startYPos);
+        const currentP = { x: touch.clientX, y: touch.clientY };
+        swipePoints.push(currentP);
+
+        // Previsualizar la curva amarilla que dibuja el dedo
+        curvePreviewGraphics.clear();
+        curvePreviewGraphics.lineStyle(3, 0xeab308, 0.8);
+        for (let i = 0; i < swipePoints.length - 1; i++) {
+          curvePreviewGraphics.lineBetween(
+            swipePoints[i].x, swipePoints[i].y,
+            swipePoints[i + 1].x, swipePoints[i + 1].y
+          );
+        }
+      };
+
+      const endSwipe = () => {
+        if (!isDrawingCurve || isShooting || isGameOver) return;
+        isDrawingCurve = false;
+        curvePreviewGraphics.clear();
+
+        if (swipePoints.length < 3) return; // Trazo muy corto
+
+        const firstP = swipePoints[0];
+        const lastP = swipePoints[swipePoints.length - 1];
+        const midP = swipePoints[Math.floor(swipePoints.length / 2)];
+
+        // Validar disparo hacia arriba
+        if (lastP.y < firstP.y - 30) {
+          isShooting = true;
+          sfx.playKick();
+
+          executeCurvedShot(scene, firstP, midP, lastP, startXPos, startYPos, width, height);
+        }
       };
 
       if (container) {
-        container.addEventListener('touchstart', (e) => { startCharge(e); moveAim(e); }, { passive: true });
-        container.addEventListener('touchmove', moveAim, { passive: true });
-        container.addEventListener('touchend', releaseShot, { passive: true });
+        container.addEventListener('touchstart', startSwipe, { passive: true });
+        container.addEventListener('touchmove', moveSwipe, { passive: true });
+        container.addEventListener('touchend', endSwipe, { passive: true });
 
-        container.addEventListener('mousedown', (e) => { startCharge(e); moveAim(e); });
-        container.addEventListener('mousemove', moveAim);
-        container.addEventListener('mouseup', releaseShot);
+        container.addEventListener('mousedown', startSwipe);
+        container.addEventListener('mousemove', moveSwipe);
+        container.addEventListener('mouseup', endSwipe);
       }
     }
 
-    function executeShot(scene, tx, ty, pValue, width, height, startXPos, startYPos) {
-      let finalY = goalY + goalHeight - 10;
-      if (pValue > 40 && pValue <= 75) {
-        finalY = goalY + (goalHeight / 2);
-      } else if (pValue > 75) {
-        finalY = goalY + 15;
-      }
-
-      const powerStat = player ? player.power : 20;
+    function executeCurvedShot(scene, pStart, pMid, pEnd, startXPos, startYPos, width, height) {
+      // El punto medio dibujado por el dedo define el giro/rosca (Curva Bézier cuadrática)
       const curveStat = player ? player.curve : 20;
-      const shotSpeed = Phaser.Math.Clamp(600 - (pValue * 2) - (powerStat * 2), 300, 550);
+      const powerStat = player ? player.power : 20;
 
-      const controlX = startXPos + ((tx - startXPos) * (1 + curveStat / 80));
+      // Calcular desvío lateral generado por el trazo del usuario
+      const curveDeviation = (pMid.x - ((pStart.x + pEnd.x) / 2)) * (1 + curveStat / 40);
+      const controlX = ((startXPos + pEnd.x) / 2) + curveDeviation;
       const controlY = height * 0.48;
 
-      const isCorner = (tx < goalX + 35 || tx > goalX + goalWidth - 35);
-      const keeperSpeed = isCorner ? 0.45 : 0.7;
-      const keeperTargetX = Phaser.Math.Clamp(tx, goalX + 18, goalX + goalWidth - 18);
+      const targetX = Phaser.Math.Clamp(pEnd.x, goalX - 15, goalX + goalWidth + 15);
+      const targetY = Phaser.Math.Clamp(pEnd.y, goalY - 10, goalY + goalHeight + 10);
+
+      const shotSpeed = Phaser.Math.Clamp(650 - (powerStat * 3.5), 320, 560);
+
+      // Animación de Estirada de Orsini
+      const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35);
+      const keeperSpeed = isCorner ? 0.42 : 0.68;
+      const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 18, goalX + goalWidth - 18);
 
       scene.tweens.add({
         targets: keeper,
@@ -247,11 +246,11 @@ export default function GameCanvas({ player, onExit }) {
           if (hasCollided) return;
 
           progress = target.t;
-          const px = Phaser.Math.Interpolation.QuadraticBezier(progress, startXPos, controlX, tx);
-          const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, finalY);
+          const px = Phaser.Math.Interpolation.QuadraticBezier(progress, startXPos, controlX, targetX);
+          const py = Phaser.Math.Interpolation.QuadraticBezier(progress, startYPos, controlY, targetY);
 
           ball.setPosition(px, py);
-          ball.setRotation(progress * 12); // Rotación del balón en el aire
+          ball.setRotation(progress * 14);
           ball.setScale(1 - progress * 0.55);
           ballShadow.setPosition(px, py + 12 * (1 - progress));
 
@@ -259,7 +258,7 @@ export default function GameCanvas({ player, onExit }) {
           trailGraphics.lineStyle(3, 0xeab308, 0.6);
           trailGraphics.lineBetween(startXPos, startYPos, px, py);
 
-          // COLISIÓN BARRERA
+          // Colisión Barrera
           wallGroup.forEach(d => {
             if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
               hasCollided = true;
@@ -270,8 +269,8 @@ export default function GameCanvas({ player, onExit }) {
             }
           });
 
-          // COLISIÓN PORTERO
-          if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
+          // Colisión Orsini
+          if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 12)) < 16 && progress > 0.8) {
             hasCollided = true;
             tween.stop();
             trailGraphics.clear();
@@ -282,7 +281,7 @@ export default function GameCanvas({ player, onExit }) {
         onComplete: () => {
           if (!hasCollided) {
             trailGraphics.clear();
-            evaluateShot(scene, tx, finalY, width, height);
+            evaluateShot(scene, targetX, targetY, width, height);
           }
         }
       });
@@ -309,12 +308,16 @@ export default function GameCanvas({ player, onExit }) {
       for (let i = 0; i < numDefenders; i++) {
         const defender = scene.add.container(startWallX + i * 22, wallY);
         
-        // Camiseta Oficial Negro y Dorado Prom '07
-        const body = scene.add.rectangle(0, 0, 16, 36, 0x0f172a);
-        const goldStripe = scene.add.rectangle(0, -6, 16, 6, 0xeab308);
-        const head = scene.add.circle(0, -22, 7, 0xfbd23c);
+        // Defensores Prom '07 con Brazos, Piernas y Camiseta
+        const legL = scene.add.rectangle(-5, 10, 4, 16, 0x0f172a);
+        const legR = scene.add.rectangle(5, 10, 4, 16, 0x0f172a);
+        const body = scene.add.rectangle(0, -6, 16, 22, 0x0f172a); // Camiseta Negra
+        const stripe = scene.add.rectangle(0, -10, 16, 4, 0xeab308); // Franja Dorada
+        const armL = scene.add.rectangle(-9, -4, 4, 14, 0x0f172a);
+        const armR = scene.add.rectangle(9, -4, 4, 14, 0x0f172a);
+        const head = scene.add.circle(0, -20, 6, 0xfbd23c);
 
-        defender.add([body, goldStripe, head]);
+        defender.add([legL, legR, body, stripe, armL, armR, head]);
         wallGroup.push(defender);
       }
     }
@@ -340,7 +343,7 @@ export default function GameCanvas({ player, onExit }) {
         sfx.playHit();
         handleCollision(scene, 'FUERA!');
       } else {
-        sfx.playGoal(); // Sonido de Gol
+        sfx.playGoal();
         totalGoals += 1;
         const isCorner = (targetX < goalX + 35 || targetX > goalX + goalWidth - 35) && targetY < goalY + 30;
         const pts = isCorner ? 250 : 100;
@@ -371,8 +374,7 @@ export default function GameCanvas({ player, onExit }) {
         ball.setScale(1);
         ballShadow.setPosition(width / 2, height - 98);
         ballShadow.setScale(1);
-        keeper.setPosition(width / 2, goalY + goalHeight - 15);
-        setPower(0);
+        keeper.setPosition(width / 2, goalY + goalHeight - 12);
         isShooting = false;
       });
     }
@@ -457,29 +459,6 @@ export default function GameCanvas({ player, onExit }) {
           </button>
         </div>
       </div>
-
-      {/* BARRA DE POTENCIA ARCADE */}
-      {isCharging && (
-        <div style={{
-          position: 'fixed',
-          bottom: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '180px',
-          height: '10px',
-          backgroundColor: '#1e293b',
-          border: '2px solid #eab308',
-          borderRadius: '5px',
-          zIndex: 99999,
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            width: `${power}%`,
-            height: '100%',
-            backgroundColor: power > 75 ? '#ef4444' : power > 40 ? '#eab308' : '#22c55e'
-          }} />
-        </div>
-      )}
 
       {/* FEEDBACK CENTRADO */}
       {feedback && (
