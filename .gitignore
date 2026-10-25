@@ -1,0 +1,15 @@
+# Logs y archivos de entorno (¡SECRETOS!)
+.env
+.env.local
+.env.*.local
+
+# Dependencias de Node
+node_modules/
+
+# Archivos de compilación / Build
+dist/
+build/
+
+# Archivos del sistema
+.DS_Store
+*.log
