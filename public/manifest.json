@@ -1,0 +1,16 @@
+{
+  "short_name": "CJ07 Strike",
+  "name": "CJ PROM '07 STRIKERS",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/53/53283.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0a0f1d",
+  "theme_color": "#0a0f1d",
+  "display": "standalone",
+  "orientation": "portrait"
+}
