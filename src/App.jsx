@@ -8,7 +8,7 @@ export default function App() {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Función para gastar Skill Points en stats
+  // Función para gastar Skill Points (SP) en estadísticas
   const upgradeStat = (playerNumber, statKey) => {
     setRoster(prevRoster => prevRoster.map(player => {
       if (player.number === playerNumber && player.skillPoints > 0 && player[statKey] < 99) {
@@ -30,28 +30,43 @@ export default function App() {
     }
   };
 
-  // Función al terminar partida para sumar EXP y Skill Points
-  const handleGameOver = (expGained) => {
-    if (!selectedPlayer) return;
-
+  // Otorgar EXP de prueba para probar el menú de mejoras
+  const giveTestExp = (playerNumber) => {
     setRoster(prevRoster => prevRoster.map(player => {
-      if (player.number === selectedPlayer.number) {
-        const newExp = player.exp + expGained;
-        const newLevel = 1 + Math.floor(newExp / 500);
-        const addedSp = newLevel > player.level ? (newLevel - player.level) * 3 : 0;
-
+      if (player.number === playerNumber) {
         const updated = {
           ...player,
-          exp: newExp,
-          level: newLevel,
-          skillPoints: player.skillPoints + addedSp
+          level: player.level + 1,
+          skillPoints: player.skillPoints + 3
         };
         setSelectedPlayer(updated);
         return updated;
       }
       return player;
     }));
+  };
 
+  // Al terminar la partida, suma EXP y calcula Skill Points ganados
+  const handleGameOver = (expGained) => {
+    if (selectedPlayer && expGained > 0) {
+      setRoster(prevRoster => prevRoster.map(player => {
+        if (player.number === selectedPlayer.number) {
+          const newExp = (player.exp || 0) + expGained;
+          const newLevel = 1 + Math.floor(newExp / 300);
+          const addedSp = newLevel > player.level ? (newLevel - player.level) * 2 : 0;
+
+          const updated = {
+            ...player,
+            exp: newExp,
+            level: newLevel,
+            skillPoints: player.skillPoints + addedSp + (expGained >= 500 ? 3 : 0)
+          };
+          setSelectedPlayer(updated);
+          return updated;
+        }
+        return player;
+      }));
+    }
     setIsPlaying(false);
   };
 
@@ -198,6 +213,25 @@ export default function App() {
                   <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e' }}>{selectedPlayer.skillPoints} SP</div>
                 </div>
               </div>
+
+              {/* Botón de Test para agregar SP directamente */}
+              <button
+                onClick={() => giveTestExp(selectedPlayer.number)}
+                style={{
+                  width: '100%',
+                  backgroundColor: '#1e293b',
+                  color: '#22c55e',
+                  border: '1px solid #22c55e',
+                  borderRadius: '4px',
+                  padding: '6px',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  marginBottom: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                ⚡ DAR +3 SKILL POINTS (TEST DE MEJORAS)
+              </button>
 
               <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', marginBottom: '8px', textTransform: 'uppercase' }}>
                 MEJORAR ATRIBUTOS
