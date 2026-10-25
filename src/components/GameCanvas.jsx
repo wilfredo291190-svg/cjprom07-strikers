@@ -64,11 +64,11 @@ export default function GameCanvas({ player, onExit }) {
         bg.fillRect(0, height * 0.25 + (i * stripeHeight), width, stripeHeight);
       }
 
-      // PORTERÍA 2.5D
+      // PORTERÍA
       goalWidth = Math.min(width * 0.75, 320);
       goalHeight = 90;
       goalX = (width - goalWidth) / 2;
-      goalY = height * 0.22;
+      goalY = height * 0.25; // Bajado ligeramente para despejar el HUD
 
       targetAimX = width / 2;
       targetAimY = goalY + goalHeight / 2;
@@ -86,7 +86,7 @@ export default function GameCanvas({ player, onExit }) {
       posts.lineStyle(5, 0xffffff, 1);
       posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
 
-      // RETÍCULA DE APUNTADO (AIM TARGET)
+      // RETÍCULA DE APUNTADO
       aimTarget = scene.add.circle(targetAimX, targetAimY, 12, 0xeab308, 0.6);
       scene.add.circle(targetAimX, targetAimY, 4, 0xffffff);
 
@@ -112,7 +112,7 @@ export default function GameCanvas({ player, onExit }) {
 
       spawnWall(scene, currentLevel, width, height);
 
-      // TIMER FIJO DE 60s
+      // TIMER
       timerEvent = scene.time.addEvent({
         delay: 1000,
         callback: () => {
@@ -128,21 +128,14 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // EVENTOS TÁCTILES NATIVOS PARA EVITAR BLOQUEO EN iOS
+      // EVENTOS TÁCTILES ROBUSTOS EN JAVASCRIPT NATIVO
       const container = document.getElementById('phaser-game-container');
 
-      const handleTouchMove = (e) => {
-        if (isShooting || isGameOver) return;
-        const touch = e.touches[0];
-        if (!touch) return;
-        
-        targetAimX = Phaser.Math.Clamp(touch.clientX, goalX + 10, goalX + goalWidth - 10);
-        targetAimY = Phaser.Math.Clamp(touch.clientY, goalY + 10, goalY + goalHeight - 10);
-        aimTarget.setPosition(targetAimX, targetAimY);
-      };
+      let chargingState = false;
 
-      const handleTouchStart = (e) => {
-        if (isShooting || isGameOver || isCharging) return;
+      const startCharge = (e) => {
+        if (isShooting || isGameOver || chargingState) return;
+        chargingState = true;
         setIsCharging(true);
         powerValue = 10;
         powerIncreasing = true;
@@ -150,18 +143,29 @@ export default function GameCanvas({ player, onExit }) {
         if (powerInterval) clearInterval(powerInterval);
         powerInterval = setInterval(() => {
           if (powerIncreasing) {
-            powerValue += 6;
+            powerValue += 4; // Velocidad regulada
             if (powerValue >= 100) powerIncreasing = false;
           } else {
-            powerValue -= 6;
+            powerValue -= 4;
             if (powerValue <= 10) powerIncreasing = true;
           }
           setPower(powerValue);
-        }, 25);
+        }, 30);
       };
 
-      const handleTouchEnd = () => {
-        if (!isCharging || isShooting || isGameOver) return;
+      const moveAim = (e) => {
+        if (isShooting || isGameOver) return;
+        const touch = e.touches ? e.touches[0] : e;
+        if (!touch) return;
+
+        targetAimX = Phaser.Math.Clamp(touch.clientX, goalX + 10, goalX + goalWidth - 10);
+        targetAimY = Phaser.Math.Clamp(touch.clientY, goalY + 10, goalY + goalHeight - 10);
+        aimTarget.setPosition(targetAimX, targetAimY);
+      };
+
+      const releaseShot = () => {
+        if (!chargingState || isShooting || isGameOver) return;
+        chargingState = false;
         clearInterval(powerInterval);
         setIsCharging(false);
         isShooting = true;
@@ -170,14 +174,18 @@ export default function GameCanvas({ player, onExit }) {
       };
 
       if (container) {
-        container.addEventListener('touchmove', handleTouchMove, { passive: false });
-        container.addEventListener('touchstart', handleTouchStart, { passive: false });
-        container.addEventListener('touchend', handleTouchEnd, { passive: false });
+        container.addEventListener('touchstart', (e) => { startCharge(e); moveAim(e); }, { passive: true });
+        container.addEventListener('touchmove', moveAim, { passive: true });
+        container.addEventListener('touchend', releaseShot, { passive: true });
+
+        // Fallback Mouse para escritorio
+        container.addEventListener('mousedown', (e) => { startCharge(e); moveAim(e); });
+        container.addEventListener('mousemove', moveAim);
+        container.addEventListener('mouseup', releaseShot);
       }
     }
 
     function executeShot(scene, tx, ty, pValue, width, height, startXPos, startYPos) {
-      // Determinación de altura según la barra de potencia
       let finalY = goalY + goalHeight - 10;
       if (pValue > 40 && pValue <= 75) {
         finalY = goalY + (goalHeight / 2);
@@ -226,7 +234,6 @@ export default function GameCanvas({ player, onExit }) {
           trailGraphics.lineStyle(3, 0xeab308, 0.6);
           trailGraphics.lineBetween(startXPos, startYPos, px, py);
 
-          // Colisión Barrera
           wallGroup.forEach(d => {
             if (Math.abs(px - d.x) < 16 && Math.abs(py - d.y) < 22) {
               hasCollided = true;
@@ -236,7 +243,6 @@ export default function GameCanvas({ player, onExit }) {
             }
           });
 
-          // Colisión Portero
           if (!hasCollided && Math.abs(px - keeper.x) < 15 && Math.abs(py - (goalY + goalHeight - 15)) < 16 && progress > 0.8) {
             hasCollided = true;
             tween.stop();
@@ -368,51 +374,56 @@ export default function GameCanvas({ player, onExit }) {
       userSelect: 'none',
       fontFamily: "'Chakra Petch', sans-serif"
     }}>
-      {/* HUD FIX NATIVO CON SAFE AREA */}
+      {/* HUD LIMPIO, SEPARADO Y ADAPTADO A NOTCH/ISLA DINÁMICA */}
       <div style={{
         position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 6px)',
         paddingBottom: '8px',
         paddingLeft: '12px',
         paddingRight: '12px',
-        display: 'flex',
-        justify: 'space-between',
+        display: 'grid',
+        gridTemplateColumns: '1fr auto 1fr',
         alignItems: 'center',
         zIndex: 999999,
-        backgroundColor: '#0f172a',
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
         borderBottom: '2px solid #eab308',
         boxSizing: 'border-box'
       }}>
+        {/* Lado Izquierdo: Puntaje y Nivel */}
         <div style={{ lineHeight: '1.2' }}>
-          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#eab308' }}>PTS: {score}</div>
           <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#3b82f6' }}>NIVEL: {level}</div>
         </div>
 
-        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ef4444', letterSpacing: '1px' }}>
+        {/* Centro: Reloj Destacado */}
+        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#ef4444', letterSpacing: '1px', textAlign: 'center' }}>
           00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
         </div>
 
-        <div style={{ fontSize: '12px', color: '#ef4444' }}>
-          {'❤️'.repeat(Math.max(0, lives))}
-        </div>
+        {/* Lado Derecho: Vidas + Botón Salir */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+          <div style={{ fontSize: '10px', color: '#ef4444' }}>
+            {'❤️'.repeat(Math.max(0, lives))}
+          </div>
 
-        <button
-          onClick={() => onExit(0)}
-          style={{
-            backgroundColor: '#1e293b',
-            color: '#eab308',
-            border: '1px solid #eab308',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '9px',
-            fontWeight: '700'
-          }}
-        >
-          SALIR
-        </button>
+          <button
+            onClick={() => onExit(0)}
+            style={{
+              backgroundColor: '#1e293b',
+              color: '#eab308',
+              border: '1px solid #eab308',
+              borderRadius: '4px',
+              padding: '3px 6px',
+              fontSize: '9px',
+              fontWeight: '700'
+            }}
+          >
+            SALIR
+          </button>
+        </div>
       </div>
 
       {/* BARRA DE POTENCIA TIPO ARCADE INFERIOR */}
@@ -422,31 +433,30 @@ export default function GameCanvas({ player, onExit }) {
           bottom: '24px',
           left: '50%',
           transform: 'translateX(-50%)',
-          width: '200px',
-          height: '12px',
+          width: '180px',
+          height: '10px',
           backgroundColor: '#1e293b',
           border: '2px solid #eab308',
-          borderRadius: '6px',
+          borderRadius: '5px',
           zIndex: 99999,
           overflow: 'hidden'
         }}>
           <div style={{
             width: `${power}%`,
             height: '100%',
-            backgroundColor: power > 75 ? '#ef4444' : power > 40 ? '#eab308' : '#22c55e',
-            transition: 'width 0.02s linear'
+            backgroundColor: power > 75 ? '#ef4444' : power > 40 ? '#eab308' : '#22c55e'
           }} />
         </div>
       )}
 
-      {/* FEEDBACK INVASIVIDAD CERO */}
+      {/* FEEDBACK CENTRADO */}
       {feedback && (
         <div style={{
           position: 'fixed',
-          top: '35%',
+          top: '38%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          fontSize: '22px',
+          fontSize: '20px',
           fontWeight: 'bold',
           color: '#eab308',
           zIndex: 999999,
