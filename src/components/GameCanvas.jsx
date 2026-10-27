@@ -20,7 +20,7 @@ export default function GameCanvas({ player, onExit }) {
       width: window.innerWidth,
       height: window.innerHeight,
       backgroundColor: '#0a0f1d',
-      pixelArt: true, // Forzar renderizado Pixel Art nítido
+      pixelArt: true,
       scene: {
         create: createScene,
         update: updateScene
@@ -33,22 +33,20 @@ export default function GameCanvas({ player, onExit }) {
     let ball, keeper, aimGuideGraphics;
     let goalX, goalY, goalWidth, goalHeight;
     let wallGroup = [];
-    let windSpeed = Math.floor(Math.random() * 7) - 3; // Viento de -3 a +3
+    let windSpeed = Math.floor(Math.random() * 7) - 3; // -3 a +3
 
     let currentScore = 0;
     let currentLives = 3;
-    let currentLevel = 1;
     let currentTime = 60;
     let isShooting = false;
     let isGameOver = false;
 
     let swipeStartX = 0, swipeStartY = 0;
-    let currentAimAngle = -Math.PI / 2; // Dirección por defecto hacia arriba
 
-    // Atributos del jugador cargado
-    const playerAccuracy = player ? player.accuracy : 25;
-    const playerCurve = player ? player.curve : 25;
-    const playerPower = player ? player.power : 25;
+    // Atributos del jugador
+    const playerAccuracy = player ? player.accuracy : 30;
+    const playerCurve = player ? player.curve : 30;
+    const playerPower = player ? player.power : 30;
 
     function createScene() {
       const scene = this;
@@ -57,69 +55,97 @@ export default function GameCanvas({ player, onExit }) {
 
       sfx.playWhistle();
 
-      // 1. FONDO DE TRIBUNAS Y CAMPO PIXEL ART
-      const bg = scene.add.graphics();
-      
-      // Tribunas
-      bg.fillStyle(0x1e293b, 1);
-      bg.fillRect(0, 0, width, height * 0.22);
+      // 1. TRIBUNA DE PÚBLICO RETRO (ESTILO SOCCER CURVE)
+      const crowdGraphics = scene.add.graphics();
+      crowdGraphics.fillStyle(0x1e293b, 1);
+      crowdGraphics.fillRect(0, 0, width, height * 0.18);
 
-      // Valla publicitaria estilo retro
-      bg.fillStyle(0xeab308, 1);
-      bg.fillRect(0, height * 0.22 - 12, width, 12);
-
-      // Campo Verde con Franjas
-      const stripeHeight = (height * 0.78) / 8;
-      for (let i = 0; i < 8; i++) {
-        bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
-        bg.fillRect(0, height * 0.22 + (i * stripeHeight), width, stripeHeight);
+      // Dibujar cabezas de público pixeladas
+      for (let x = 10; x < width; x += 16) {
+        for (let y = 10; y < height * 0.16; y += 14) {
+          const color = (x + y) % 3 === 0 ? 0xeab308 : (x + y) % 2 === 0 ? 0xef4444 : 0x38bdf8;
+          crowdGraphics.fillStyle(color, 1);
+          crowdGraphics.fillRect(x, y, 10, 10);
+        }
       }
 
-      // Línea de área blanca
-      bg.lineStyle(2, 0xffffff, 0.5);
-      bg.strokeLineShape(new Phaser.Geom.Line(width * 0.1, height * 0.42, width * 0.9, height * 0.42));
+      // 2. VALLA PUBLICITARIA Y CAMPO
+      const bg = scene.add.graphics();
+      // Valla
+      bg.fillStyle(0x991b1b, 1);
+      bg.fillRect(0, height * 0.18, width, 16);
+      bg.fillStyle(0xffffff, 1);
+      bg.fillRect(0, height * 0.18 + 4, width, 8);
 
-      // 2. PORTERÍA Y ORSINI (#94) PIXEL ART
-      goalWidth = Math.min(width * 0.72, 290);
-      goalHeight = 85;
+      // Césped
+      const stripeH = (height * 0.82) / 7;
+      for (let i = 0; i < 7; i++) {
+        bg.fillStyle(i % 2 === 0 ? 0x16a34a : 0x15803d, 1);
+        bg.fillRect(0, height * 0.18 + 16 + (i * stripeH), width, stripeH);
+      }
+
+      // Líneas del área en perspectiva
+      bg.lineStyle(2, 0xffffff, 0.7);
+      const areaTopY = height * 0.32;
+      const areaBottomY = height * 0.60;
+      bg.strokeRect(width * 0.2, areaTopY, width * 0.6, areaBottomY - areaTopY);
+
+      // Semi-círculo del área
+      bg.strokeCircle(width / 2, height * 0.70, 70);
+
+      // 3. PORTERÍA Y ORSINI (#94)
+      goalWidth = Math.min(width * 0.45, 240);
+      goalHeight = 70;
       goalX = (width - goalWidth) / 2;
       goalY = height * 0.22;
 
-      // Red Pixel
+      // Red
       const net = scene.add.graphics();
-      net.lineStyle(1, 0xffffff, 0.3);
-      for (let x = goalX; x <= goalX + goalWidth; x += 10) {
+      net.lineStyle(1, 0xffffff, 0.4);
+      for (let x = goalX; x <= goalX + goalWidth; x += 8) {
         net.lineBetween(x, goalY, x, goalY + goalHeight);
       }
-      for (let y = goalY; y <= goalY + goalHeight; y += 10) {
+      for (let y = goalY; y <= goalY + goalHeight; y += 8) {
         net.lineBetween(goalX, y, goalX + goalWidth, y);
       }
 
-      // Marco blanco
+      // Marco
       const posts = scene.add.graphics();
       posts.lineStyle(4, 0xffffff, 1);
       posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
 
       // Portero Orsini (#94)
-      keeper = scene.add.container(width / 2, goalY + goalHeight - 14);
-      const kBody = scene.add.rectangle(0, -10, 16, 24, 0xeab308);
-      const kHead = scene.add.circle(0, -22, 6, 0xfbd23c);
+      keeper = scene.add.container(width / 2, goalY + goalHeight - 12);
+      const kBody = scene.add.rectangle(0, -8, 14, 20, 0xeab308);
+      const kHead = scene.add.circle(0, -18, 5, 0xfbd23c);
       keeper.add([kBody, kHead]);
 
-      // 3. BALÓN Y PATEADOR EN POSICIÓN
-      const ballX = width / 2;
-      const ballY = height - 120;
+      // 4. BARRERA DE RIVALES
+      spawnWall(scene, width, height);
 
+      // 5. PATEADOR Y BALÓN
+      const ballX = width / 2;
+      const ballY = height - 110;
+
+      // Jugador de espaldas
+      const kicker = scene.add.container(ballX, ballY + 20);
+      const pBody = scene.add.rectangle(0, -10, 16, 22, 0x0f172a); // Camiseta negra
+      const pStripe = scene.add.rectangle(0, -12, 16, 4, 0xeab308); // Franja dorada
+      const pHead = scene.add.circle(0, -20, 6, 0xfbd23c);
+      kicker.add([pBody, pStripe, pHead]);
+
+      // Balón
       ball = scene.add.container(ballX, ballY);
-      const ballBase = scene.add.circle(0, 0, 10, 0xffffff);
-      const ballDot = scene.add.circle(0, 0, 4, 0x0f172a);
-      ball.add([ballBase, ballDot]);
+      const bBase = scene.add.circle(0, 0, 8, 0xffffff);
+      const bDot = scene.add.circle(0, 0, 3, 0x0f172a);
+      ball.add([bBase, bDot]);
 
       aimGuideGraphics = scene.add.graphics();
 
-      spawnDefendersWall(scene, currentLevel, width, height);
+      // INDICADOR DE VIENTO RETRO (ABAJO IZQUIERDA)
+      createWindIndicator(scene, height);
 
-      // RELOJ DE TIEMPO
+      // RELOJ
       scene.time.addEvent({
         delay: 1000,
         callback: () => {
@@ -131,7 +157,7 @@ export default function GameCanvas({ player, onExit }) {
         loop: true
       });
 
-      // 4. CONTROLES Y DIBUJO DE LÍNEA PUNTEADA MEJORADA POR PUNTERÍA
+      // CONTROLES DE SWIPE / APUNTADO
       scene.input.on('pointerdown', (pointer) => {
         if (isShooting || isGameOver) return;
         swipeStartX = pointer.x;
@@ -143,10 +169,9 @@ export default function GameCanvas({ player, onExit }) {
 
         const dx = pointer.x - swipeStartX;
         const dy = pointer.y - swipeStartY;
-        currentAimAngle = Math.atan2(dy, dx);
+        const angle = Math.atan2(dy, dx);
 
-        // Dibujar línea punteada indicadora basada en Puntería
-        drawAimGuide(ballX, ballY, currentAimAngle, playerAccuracy, playerCurve, windSpeed);
+        drawAimGuide(ballX, ballY, angle, playerAccuracy, playerCurve, windSpeed);
       });
 
       scene.input.on('pointerup', (pointer) => {
@@ -157,53 +182,56 @@ export default function GameCanvas({ player, onExit }) {
         const dy = pointer.y - swipeStartY;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist > 25 && dy < 0) {
+        if (dist > 20 && dy < 0) {
           executeShot(scene, dx, dy, width, height, ballX, ballY);
         }
       });
     }
 
-    // Dibujo de Línea Punteada Dinámica (Escala según Puntería/Accuracy)
+    function createWindIndicator(scene, height) {
+      const windContainer = scene.add.container(50, height - 70);
+      const circle = scene.add.circle(0, 0, 22, 0x1e293b, 0.8).setStrokeStyle(2, 0x22c55e);
+      const text = scene.add.text(0, -30, 'WIND', {
+        fontFamily: "'Chakra Petch', sans-serif", fontSize: '10px', color: '#22c55e', fontStyle: 'bold'
+      }).setOrigin(0.5);
+
+      const arrow = scene.add.text(0, 0, windSpeed >= 0 ? '➡️' : '⬅️', { fontSize: '14px' }).setOrigin(0.5);
+      windContainer.add([circle, text, arrow]);
+    }
+
     function drawAimGuide(bx, by, angle, accuracyStat, curveStat, wind) {
       aimGuideGraphics.clear();
-      aimGuideGraphics.lineStyle(2, 0xeab308, 0.8);
+      aimGuideGraphics.lineStyle(2, 0xeab308, 0.9);
 
-      // Largo de la guía en base a la puntería (Mayor Accuracy = Línea más larga)
-      const guideLength = Phaser.Math.Clamp(accuracyStat * 3.5, 60, 220);
-      const dotsCount = Math.floor(guideLength / 12);
-
-      let px = bx;
-      let py = by;
+      // Puntería determina la longitud
+      const guideLength = Phaser.Math.Clamp(accuracyStat * 3.8, 70, 230);
+      const dotsCount = Math.floor(guideLength / 10);
 
       for (let i = 0; i < dotsCount; i++) {
         const step = i / dotsCount;
-        // La proyección de la guía simula la curva y el viento
-        const curveFactor = (curveStat / 50) * (step * step) * 20;
-        const windFactor = wind * step * 8;
+        const curveOffset = (curveStat / 40) * (step * step) * 22;
+        const windOffset = wind * step * 7;
 
-        const nextX = bx + Math.cos(angle) * (step * guideLength) + curveFactor + windFactor;
-        const nextY = by + Math.sin(angle) * (step * guideLength);
+        const nx = bx + Math.cos(angle) * (step * guideLength) + curveOffset + windOffset;
+        const ny = by + Math.sin(angle) * (step * guideLength);
 
-        aimGuideGraphics.fillCircle(nextX, nextY, 2.5);
+        aimGuideGraphics.fillCircle(nx, ny, 2);
       }
     }
 
-    function spawnDefendersWall(scene, levelNum, width, height) {
+    function spawnWall(scene, width, height) {
       wallGroup.forEach(d => d.destroy());
       wallGroup = [];
 
-      if (levelNum === 1) return;
-
-      const count = levelNum === 2 ? 2 : levelNum === 3 ? 3 : 4;
-      const wallY = height * 0.52;
-      const startX = width / 2 - ((count - 1) * 22) / 2;
+      const wallY = height * 0.48;
+      const count = 3;
+      const startX = width / 2 - ((count - 1) * 20) / 2;
 
       for (let i = 0; i < count; i++) {
-        const defender = scene.add.container(startX + i * 22, wallY);
-        const dBody = scene.add.rectangle(0, 0, 16, 32, 0x0f172a);
-        const dStripe = scene.add.rectangle(0, -8, 16, 4, 0xeab308);
-        const dHead = scene.add.circle(0, -18, 6, 0xfbd23c);
-        defender.add([dBody, dStripe, dHead]);
+        const defender = scene.add.container(startX + i * 20, wallY);
+        const dBody = scene.add.rectangle(0, 0, 14, 28, 0x1d4ed8); // Rival azul
+        const dHead = scene.add.circle(0, -16, 5, 0xfbd23c);
+        defender.add([dBody, dHead]);
         wallGroup.push(defender);
       }
     }
@@ -212,44 +240,39 @@ export default function GameCanvas({ player, onExit }) {
       isShooting = true;
       sfx.playKick();
 
-      // Cálculo de Curva y Potencia en base a Stats
+      const curveFactor = (playerCurve / 25);
       const powerFactor = (playerPower / 100) + 1;
-      const curveFactor = (playerCurve / 30);
 
-      // Posición final objetivo
-      let targetX = bx + dx * powerFactor + (curveFactor * 25) + (windSpeed * 8);
-      let targetY = goalY + goalHeight / 2;
+      const targetX = bx + (dx * powerFactor) + (curveFactor * 20) + (windSpeed * 6);
+      const targetY = goalY + goalHeight / 2;
 
-      // Reacción de Orsini
+      // Movimiento de Orsini
       scene.tweens.add({
         targets: keeper,
-        x: Phaser.Math.Clamp(targetX, goalX + 20, goalX + goalWidth - 20),
-        duration: 380,
+        x: Phaser.Math.Clamp(targetX, goalX + 15, goalX + goalWidth - 15),
+        duration: 360,
         ease: 'Power1.out'
       });
 
-      // Animación curva del balón en Bézier
-      const controlX = bx + (dx / 2) + (curveFactor * 40);
+      const controlX = bx + (dx / 2) + (curveFactor * 35);
       const controlY = by - (Math.abs(dy) / 2);
-
-      let progress = 0;
 
       scene.tweens.add({
         targets: { t: 0 },
         t: 1,
-        duration: 450,
+        duration: 420,
         ease: 'Power1.out',
         onUpdate: (tween, target) => {
-          progress = target.t;
+          const progress = target.t;
           const px = Phaser.Math.Interpolation.QuadraticBezier(progress, bx, controlX, targetX);
           const py = Phaser.Math.Interpolation.QuadraticBezier(progress, by, controlY, targetY);
 
           ball.setPosition(px, py);
-          ball.setScale(1 - progress * 0.4);
+          ball.setScale(1 - progress * 0.45);
 
-          // Impacto en barrera
+          // Colisión Barrera
           wallGroup.forEach(d => {
-            if (Math.abs(px - d.x) < 15 && Math.abs(py - d.y) < 18) {
+            if (Math.abs(px - d.x) < 12 && Math.abs(py - d.y) < 16) {
               tween.stop();
               sfx.playHit();
               handleLifeLoss('¡PEGÓ EN LA BARRERA!');
@@ -263,7 +286,7 @@ export default function GameCanvas({ player, onExit }) {
     }
 
     function evalShot(scene, tx, ty, width, height) {
-      const saved = Math.abs(tx - keeper.x) < 22;
+      const saved = Math.abs(tx - keeper.x) < 20;
 
       if (saved) {
         sfx.playHit();
@@ -297,11 +320,11 @@ export default function GameCanvas({ player, onExit }) {
       setTimeout(() => {
         if (isGameOver) return;
         isShooting = false;
-        ball.setPosition(width / 2, height - 120);
+        ball.setPosition(width / 2, height - 110);
         ball.setScale(1);
-        keeper.setPosition(width / 2, goalY + goalHeight - 14);
+        keeper.setPosition(width / 2, goalY + goalHeight - 12);
         windSpeed = Math.floor(Math.random() * 7) - 3;
-      }, 700);
+      }, 750);
     }
 
     function triggerFeedback(txt) {
@@ -326,7 +349,7 @@ export default function GameCanvas({ player, onExit }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', touchAction: 'none' }}>
-      {/* HUD SUPERIOR */}
+      {/* HUD RETRO SUPERIOR */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -376,7 +399,7 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       </div>
 
-      {/* BOTONES DE POWER-UPS PROM '07 */}
+      {/* POWER-UPS PROM '07 */}
       <div style={{
         position: 'fixed',
         bottom: '16px',
