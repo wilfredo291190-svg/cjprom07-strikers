@@ -10,7 +10,7 @@ export default function GameCanvas({ player, onExit }) {
   const [lives, setLives] = useState(3);
   const [timeLeft, setTimeLeft] = useState(60);
   const [feedback, setFeedback] = useState('');
-  const [activeItem, setActiveItem] = useState(null);
+  const [activeItem, setActiveItem] = useState(null); // 'CURVE' | 'LIGHTNING' | 'FIRE'
   const [gameOverData, setGameOverData] = useState(null);
 
   useEffect(() => {
@@ -38,6 +38,7 @@ export default function GameCanvas({ player, onExit }) {
     let windSpeed = Math.floor(Math.random() * 7) - 3; // -3 a +3
 
     let currentScore = 0;
+    let currentLevel = 1;
     let currentLives = 3;
     let currentTime = 60;
     let isShooting = false;
@@ -70,7 +71,7 @@ export default function GameCanvas({ player, onExit }) {
       person('kicker', { hair: 0x3b2410, skin: 0xe0a870, shirt: 0x0f172a, shade: 0x020617, stripe: 0xeab308, shorts: 0xeab308 });
       person('rival', { hair: 0x1c1917, skin: 0xd9a066, shirt: 0x2563eb, shade: 0x1e3a8a, stripe: 0xffffff, shorts: 0x1e3a8a });
 
-      // Portero con guantes
+      // Portero
       r(7, 0, 8, 7, 0x1c1917); r(8, 7, 6, 2, 0xe0a870);
       r(5, 9, 12, 10, 0xeab308); r(5, 9, 3, 10, 0xa16207); r(14, 9, 3, 10, 0xa16207);
       r(0, 9, 5, 4, 0xeab308); r(17, 9, 5, 4, 0xeab308);
@@ -80,7 +81,7 @@ export default function GameCanvas({ player, onExit }) {
       r(7, 28, 3, 2, 0x0b0b0b); r(12, 28, 3, 2, 0x0b0b0b);
       bake('keeper', 22, 30);
 
-      // Balón con paneles
+      // Balón
       g.fillStyle(0xffffff, 1); g.fillCircle(8, 8, 7);
       g.fillStyle(0x1e293b, 1);
       g.fillCircle(8, 8, 2.6); g.fillCircle(3.5, 5, 1.6); g.fillCircle(12.5, 5, 1.6);
@@ -122,7 +123,6 @@ export default function GameCanvas({ player, onExit }) {
       }));
       crowdLayers = layers;
 
-      // Valla publicitaria con sombra
       const ad = scene.add.graphics().setDepth(1);
       ad.fillStyle(0x7f1d1d, 1); ad.fillRect(0, crowdH, W, 22);
       const cols = [0xffffff, 0xeab308, 0x1d4ed8];
@@ -150,7 +150,6 @@ export default function GameCanvas({ player, onExit }) {
         g.fillRect(0, y, W, h);
         y += h;
       }
-      // Luz: oscurece abajo y aclara arriba
       g.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0, 0, 0.4, 0.4);
       g.fillRect(0, top, W, H - top);
 
@@ -214,7 +213,7 @@ export default function GameCanvas({ player, onExit }) {
       drawGoal(scene);
 
       keeper = makePerson(scene, W / 2, goalY + goalHeight - 2, 'keeper', S * 0.9).setDepth(4);
-      spawnWall(scene, W, H);
+      spawnWall(scene, W, H, currentLevel);
 
       const ballX = W / 2;
       const ballY = H - 110;
@@ -243,8 +242,10 @@ export default function GameCanvas({ player, onExit }) {
       });
       scene.input.on('pointermove', (pointer) => {
         if (isShooting || isGameOver || !pointer.isDown) return;
-        const angle = Math.atan2(pointer.y - swipeStartY, pointer.x - swipeStartX);
-        drawAimGuide(ballX, ballY, angle, playerAccuracy, playerCurve, windSpeed);
+        const dx = pointer.x - swipeStartX;
+        const dy = pointer.y - swipeStartY;
+        const angle = Math.atan2(dy, dx);
+        drawAimGuide(ballX, ballY, angle, dx, dy, playerAccuracy, playerCurve, windSpeed);
       });
       scene.input.on('pointerup', (pointer) => {
         if (isShooting || isGameOver) return;
@@ -268,28 +269,43 @@ export default function GameCanvas({ player, onExit }) {
       windContainer.add([circle, text, arrow]);
     }
 
-    function drawAimGuide(bx, by, angle, accuracyStat, curveStat, wind) {
+    function drawAimGuide(bx, by, angle, dx, dy, accuracyStat, curveStat, wind) {
       aimGuideGraphics.clear();
       const guideLength = Phaser.Math.Clamp(accuracyStat * 3.8, 70, 230);
       const dotsCount = Math.floor(guideLength / 10);
+      
+      let sideCurve = (dx * 0.25) * (curveStat / 50);
+      if (activeItem === 'CURVE') sideCurve *= 2.5;
+
       for (let i = 0; i < dotsCount; i++) {
         const step = i / dotsCount;
-        const curveOffset = (curveStat / 40) * (step * step) * 22;
-        const windOffset = wind * step * 7;
+        const curveOffset = sideCurve * (step * step);
+        const windOffset = (activeItem === 'LIGHTNING' ? 0 : wind) * step * 7;
         const nx = bx + Math.cos(angle) * (step * guideLength) + curveOffset + windOffset;
         const ny = by + Math.sin(angle) * (step * guideLength);
-        aimGuideGraphics.fillStyle(0xfacc15, 1 - step * 0.6);
+
+        let color = 0xfacc15;
+        if (activeItem === 'FIRE') color = 0xef4444;
+        else if (activeItem === 'LIGHTNING') color = 0x38bdf8;
+
+        aimGuideGraphics.fillStyle(color, 1 - step * 0.6);
         aimGuideGraphics.fillCircle(nx, ny, 3.5 - step * 1.8);
       }
     }
 
-    function spawnWall(scene, W, H) {
+    function spawnWall(scene, W, H, lvl) {
       wallGroup.forEach(d => d.destroy());
       wallGroup = [];
+
+      // Nivel 1: Sin barrera
+      if (lvl <= 1) return;
+
       wallY = H * 0.48;
+      const count = lvl === 2 ? 2 : 3;
       const gap = 17 * S;
-      const startX = W / 2 - gap;
-      for (let i = 0; i < 3; i++) {
+      const startX = W / 2 - ((count - 1) * gap) / 2;
+
+      for (let i = 0; i < count; i++) {
         wallGroup.push(makePerson(scene, startX + i * gap, wallY, 'rival', S * 0.95).setDepth(10));
       }
     }
@@ -298,37 +314,52 @@ export default function GameCanvas({ player, onExit }) {
       isShooting = true;
       sfx.playKick();
 
-      const curveFactor = (playerCurve / 25);
-      const powerFactor = (playerPower / 100) + 1;
-      const targetX = bx + (dx * powerFactor) + (curveFactor * 20) + (windSpeed * 6);
+      let pCurve = playerCurve;
+      let pPower = playerPower;
+
+      if (activeItem === 'CURVE') pCurve *= 2.2;
+      if (activeItem === 'FIRE') pPower *= 2.0;
+
+      const powerFactor = (pPower / 100) + 0.8;
+      const sideCurve = (dx * 0.4) * (pCurve / 40);
+      const effectiveWind = activeItem === 'LIGHTNING' ? 0 : windSpeed;
+
+      const targetX = bx + (dx * 1.2 * powerFactor) + sideCurve + (effectiveWind * 8);
       const targetY = goalY + goalHeight / 2;
 
-      // Pateador: pequeño impulso
+      // Cálculo de elevación (si la parábola sube lo suficiente para saltar la barrera)
+      const isHighShot = Math.abs(dy) > 130;
+      const baseLift = (isHighShot ? 28 : 12) * S;
+
       scene.tweens.add({ targets: kicker, y: kicker.y - 10, duration: 90, yoyo: true });
 
-      // Portero: se lanza con rotación
+      // Portero reacciona con base en la habilidad del disparo
       const dir = targetX >= keeper.x ? 1 : -1;
       const keeperTargetX = Phaser.Math.Clamp(targetX, goalX + 15, goalX + goalWidth - 15);
+      const keeperDuration = activeItem === 'LIGHTNING' ? 220 : 380;
+
       scene.tweens.add({
         targets: keeper, x: keeperTargetX, angle: dir * 60, y: keeper.y - 6 * S,
-        duration: 360, ease: 'Power1.out'
+        duration: keeperDuration, ease: 'Power1.out'
       });
 
-      const controlX = bx + (dx / 2) + (curveFactor * 35);
-      const controlY = by - (Math.abs(dy) / 2);
+      const controlX = bx + (dx * 0.5) + (sideCurve * 0.8);
+      const controlY = by - (Math.abs(dy) * 0.5);
       let wallJumped = false;
       let lastTrail = 0;
+
+      const shotDuration = activeItem === 'LIGHTNING' ? 260 : 420;
 
       scene.tweens.add({
         targets: { t: 0 },
         t: 1,
-        duration: 420,
+        duration: shotDuration,
         ease: 'Power1.out',
         onUpdate: (tween, target) => {
           const p = target.t;
           const px = Phaser.Math.Interpolation.QuadraticBezier(p, bx, controlX, targetX);
           const py = Phaser.Math.Interpolation.QuadraticBezier(p, by, controlY, targetY);
-          const lift = Math.sin(p * Math.PI) * 12 * S;
+          const lift = Math.sin(p * Math.PI) * baseLift;
 
           ball.setPosition(px, py - lift);
           ball.setScale(ballBase * (1 - p * 0.45));
@@ -336,42 +367,63 @@ export default function GameCanvas({ player, onExit }) {
           ballShadow.setPosition(px, py + 8 * (1 - p * 0.45));
           ballShadow.setScale(ballBase * 0.8 * (1 - p * 0.45) * (1 - lift / (40 * S)));
 
-          if (p - lastTrail > 0.06) {
+          if (p - lastTrail > 0.05) {
             lastTrail = p;
-            const tr = scene.add.image(px, py - lift, 'spark').setScale(2.2 * (1 - p * 0.5)).setAlpha(0.7).setDepth(24);
+            let sparkColor = 0xffffff;
+            if (activeItem === 'FIRE') sparkColor = 0xef4444;
+            else if (activeItem === 'LIGHTNING') sparkColor = 0x38bdf8;
+
+            const tr = scene.add.image(px, py - lift, 'spark').setScale(2.2 * (1 - p * 0.5)).setAlpha(0.7).setDepth(24).setTint(sparkColor);
             scene.tweens.add({ targets: tr, alpha: 0, scale: 0, duration: 320, onComplete: () => tr.destroy() });
           }
 
-          if (!wallJumped && py < wallY + 50) {
+          // Salto de la barrera
+          if (!wallJumped && py < wallY + 50 && currentLevel > 1) {
             wallJumped = true;
             wallGroup.forEach(d => scene.tweens.add({ targets: d, y: d.y - 9 * S, duration: 150, yoyo: true }));
           }
 
+          // Colisión con la barrera
           wallGroup.forEach(d => {
-            if (Math.abs(px - d.x) < 12 * S && Math.abs(py - d.y + 12 * S) < 16 * S) {
-              tween.stop();
-              sfx.playHit();
-              scene.cameras.main.shake(120, 0.003);
-              handleLifeLoss('¡PEGÓ EN LA BARRERA!');
+            if (Math.abs(px - d.x) < 14 * S && Math.abs((py - lift) - d.y) < 18 * S) {
+              if (activeItem === 'FIRE') {
+                // El Tiro de Fuego rompe la barrera
+                scene.tweens.add({ targets: d, alpha: 0.2, y: d.y + 10, duration: 200 });
+              } else {
+                tween.stop();
+                sfx.playHit();
+                scene.cameras.main.shake(120, 0.003);
+                handleLifeLoss('¡PEGÓ EN LA BARRERA!');
+              }
             }
           });
         },
-        onComplete: () => evalShot(scene, targetX, targetY, width, height)
+        onComplete: () => {
+          evalShot(scene, targetX, targetY, width, height);
+          setActiveItem(null); // Consumir habilidad activa
+        }
       });
     }
 
     function evalShot(scene, tx, ty, width, height) {
-      const saved = Math.abs(tx - keeper.x) < 20 * (S / 2) + 10;
+      const saved = Math.abs(tx - keeper.x) < 22 * (S / 2) + 10;
 
-      if (saved) {
+      if (saved && activeItem !== 'FIRE') {
         sfx.playHit();
         scene.cameras.main.shake(120, 0.003);
-        handleLifeLoss('¡TAPÓ ORSINI!');
+        handleLifeLoss('¡TAPÓ EL PORTERO!');
       } else if (tx >= goalX && tx <= goalX + goalWidth) {
         sfx.playGoal();
         currentScore += 200;
         setScore(currentScore);
         triggerFeedback('¡GOOOLAZO!');
+
+        // Subir de nivel cada 400 puntos
+        if (currentScore >= currentLevel * 400) {
+          currentLevel += 1;
+          setLevel(currentLevel);
+          spawnWall(scene, width, height, currentLevel);
+        }
 
         scene.cameras.main.shake(200, 0.005);
         scene.cameras.main.flash(160, 255, 255, 190);
@@ -490,21 +542,21 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       </div>
 
-      {/* POWER-UPS PROM '07 */}
+      {/* POWER-UPS Y TIROS ESPECIALES */}
       <div style={{
         position: 'fixed',
         bottom: '16px',
         left: '50%',
         transform: 'translateX(-50%)',
         display: 'flex',
-        gap: '10px',
+        gap: '8px',
         zIndex: 999999
       }}>
         <button
-          onClick={() => setActiveItem('BANANA')}
+          onClick={() => setActiveItem(activeItem === 'CURVE' ? null : 'CURVE')}
           style={{
-            backgroundColor: activeItem === 'BANANA' ? '#eab308' : '#1e293b',
-            color: activeItem === 'BANANA' ? '#0f172a' : '#eab308',
+            backgroundColor: activeItem === 'CURVE' ? '#eab308' : '#1e293b',
+            color: activeItem === 'CURVE' ? '#0f172a' : '#eab308',
             border: '1px solid #eab308',
             borderRadius: '6px',
             padding: '6px 10px',
@@ -513,14 +565,14 @@ export default function GameCanvas({ player, onExit }) {
             fontFamily: "'Chakra Petch', sans-serif"
           }}
         >
-          🍌 BANANAZO
+          🔥 BENDITO
         </button>
 
         <button
-          onClick={() => setActiveItem('THUNDER')}
+          onClick={() => setActiveItem(activeItem === 'LIGHTNING' ? null : 'LIGHTNING')}
           style={{
-            backgroundColor: activeItem === 'THUNDER' ? '#3b82f6' : '#1e293b',
-            color: activeItem === 'THUNDER' ? '#ffffff' : '#3b82f6',
+            backgroundColor: activeItem === 'LIGHTNING' ? '#3b82f6' : '#1e293b',
+            color: activeItem === 'LIGHTNING' ? '#ffffff' : '#3b82f6',
             border: '1px solid #3b82f6',
             borderRadius: '6px',
             padding: '6px 10px',
@@ -529,7 +581,23 @@ export default function GameCanvas({ player, onExit }) {
             fontFamily: "'Chakra Petch', sans-serif"
           }}
         >
-          ⚡ TRUENO
+          ⚡ RAYO
+        </button>
+
+        <button
+          onClick={() => setActiveItem(activeItem === 'FIRE' ? null : 'FIRE')}
+          style={{
+            backgroundColor: activeItem === 'FIRE' ? '#ef4444' : '#1e293b',
+            color: activeItem === 'FIRE' ? '#ffffff' : '#ef4444',
+            border: '1px solid #ef4444',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            fontSize: '10px',
+            fontWeight: 'bold',
+            fontFamily: "'Chakra Petch', sans-serif"
+          }}
+        >
+          💥 FUEGO
         </button>
       </div>
 
