@@ -1,148 +1,331 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
+import Phaser from 'phaser';
 import { sfx } from '../utils/audio';
 
 export default function GameCanvas({ player, onExit }) {
-  const mountRef = useRef(null);
+  const gameRef = useRef(null);
 
   const [score, setScore] = useState(0);
   const [level, setLevel] = useState(1);
   const [lives, setLives] = useState(3);
   const [timeLeft, setTimeLeft] = useState(60);
   const [feedback, setFeedback] = useState('');
+  const [activeItem, setActiveItem] = useState(null);
   const [gameOverData, setGameOverData] = useState(null);
 
   useEffect(() => {
-    const container = mountRef.current;
-    if (!container) return;
+    const config = {
+      type: Phaser.AUTO,
+      parent: 'phaser-game-container',
+      width: window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: '#0a0f1d',
+      pixelArt: true, // Forzar renderizado Pixel Art nítido
+      scene: {
+        create: createScene,
+        update: updateScene
+      }
+    };
 
-    // Dimensiones seguras para producción
-    const width = container.clientWidth || window.innerWidth;
-    const height = container.clientHeight || window.innerHeight;
+    const game = new Phaser.Game(config);
+    gameRef.current = game;
 
-    // 1. ESCENA Y RENDERIZADOR
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x060913);
-    scene.fog = new THREE.FogExp2(0x060913, 0.012);
+    let ball, keeper, aimGuideGraphics;
+    let goalX, goalY, goalWidth, goalHeight;
+    let wallGroup = [];
+    let windSpeed = Math.floor(Math.random() * 7) - 3; // Viento de -3 a +3
 
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-    camera.position.set(0, 3.2, 9.5);
+    let currentScore = 0;
+    let currentLives = 3;
+    let currentLevel = 1;
+    let currentTime = 60;
+    let isShooting = false;
+    let isGameOver = false;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    let swipeStartX = 0, swipeStartY = 0;
+    let currentAimAngle = -Math.PI / 2; // Dirección por defecto hacia arriba
 
-    // Limpiar cualquier canvas previo
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
+    // Atributos del jugador cargado
+    const playerAccuracy = player ? player.accuracy : 25;
+    const playerCurve = player ? player.curve : 25;
+    const playerPower = player ? player.power : 25;
+
+    function createScene() {
+      const scene = this;
+      const width = scene.cameras.main.width;
+      const height = scene.cameras.main.height;
+
+      sfx.playWhistle();
+
+      // 1. FONDO DE TRIBUNAS Y CAMPO PIXEL ART
+      const bg = scene.add.graphics();
+      
+      // Tribunas
+      bg.fillStyle(0x1e293b, 1);
+      bg.fillRect(0, 0, width, height * 0.22);
+
+      // Valla publicitaria estilo retro
+      bg.fillStyle(0xeab308, 1);
+      bg.fillRect(0, height * 0.22 - 12, width, 12);
+
+      // Campo Verde con Franjas
+      const stripeHeight = (height * 0.78) / 8;
+      for (let i = 0; i < 8; i++) {
+        bg.fillStyle(i % 2 === 0 ? 0x15803d : 0x166534, 1);
+        bg.fillRect(0, height * 0.22 + (i * stripeHeight), width, stripeHeight);
+      }
+
+      // Línea de área blanca
+      bg.lineStyle(2, 0xffffff, 0.5);
+      bg.strokeLineShape(new Phaser.Geom.Line(width * 0.1, height * 0.42, width * 0.9, height * 0.42));
+
+      // 2. PORTERÍA Y ORSINI (#94) PIXEL ART
+      goalWidth = Math.min(width * 0.72, 290);
+      goalHeight = 85;
+      goalX = (width - goalWidth) / 2;
+      goalY = height * 0.22;
+
+      // Red Pixel
+      const net = scene.add.graphics();
+      net.lineStyle(1, 0xffffff, 0.3);
+      for (let x = goalX; x <= goalX + goalWidth; x += 10) {
+        net.lineBetween(x, goalY, x, goalY + goalHeight);
+      }
+      for (let y = goalY; y <= goalY + goalHeight; y += 10) {
+        net.lineBetween(goalX, y, goalX + goalWidth, y);
+      }
+
+      // Marco blanco
+      const posts = scene.add.graphics();
+      posts.lineStyle(4, 0xffffff, 1);
+      posts.strokeRect(goalX, goalY, goalWidth, goalHeight);
+
+      // Portero Orsini (#94)
+      keeper = scene.add.container(width / 2, goalY + goalHeight - 14);
+      const kBody = scene.add.rectangle(0, -10, 16, 24, 0xeab308);
+      const kHead = scene.add.circle(0, -22, 6, 0xfbd23c);
+      keeper.add([kBody, kHead]);
+
+      // 3. BALÓN Y PATEADOR EN POSICIÓN
+      const ballX = width / 2;
+      const ballY = height - 120;
+
+      ball = scene.add.container(ballX, ballY);
+      const ballBase = scene.add.circle(0, 0, 10, 0xffffff);
+      const ballDot = scene.add.circle(0, 0, 4, 0x0f172a);
+      ball.add([ballBase, ballDot]);
+
+      aimGuideGraphics = scene.add.graphics();
+
+      spawnDefendersWall(scene, currentLevel, width, height);
+
+      // RELOJ DE TIEMPO
+      scene.time.addEvent({
+        delay: 1000,
+        callback: () => {
+          if (isGameOver) return;
+          currentTime -= 1;
+          setTimeLeft(currentTime);
+          if (currentTime <= 0) triggerGameOver('¡TIEMPO AGOTADO!');
+        },
+        loop: true
+      });
+
+      // 4. CONTROLES Y DIBUJO DE LÍNEA PUNTEADA MEJORADA POR PUNTERÍA
+      scene.input.on('pointerdown', (pointer) => {
+        if (isShooting || isGameOver) return;
+        swipeStartX = pointer.x;
+        swipeStartY = pointer.y;
+      });
+
+      scene.input.on('pointermove', (pointer) => {
+        if (isShooting || isGameOver || !pointer.isDown) return;
+
+        const dx = pointer.x - swipeStartX;
+        const dy = pointer.y - swipeStartY;
+        currentAimAngle = Math.atan2(dy, dx);
+
+        // Dibujar línea punteada indicadora basada en Puntería
+        drawAimGuide(ballX, ballY, currentAimAngle, playerAccuracy, playerCurve, windSpeed);
+      });
+
+      scene.input.on('pointerup', (pointer) => {
+        if (isShooting || isGameOver) return;
+        aimGuideGraphics.clear();
+
+        const dx = pointer.x - swipeStartX;
+        const dy = pointer.y - swipeStartY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 25 && dy < 0) {
+          executeShot(scene, dx, dy, width, height, ballX, ballY);
+        }
+      });
     }
-    container.appendChild(renderer.domElement);
 
-    // 2. ILUMINACIÓN
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
-    scene.add(ambientLight);
+    // Dibujo de Línea Punteada Dinámica (Escala según Puntería/Accuracy)
+    function drawAimGuide(bx, by, angle, accuracyStat, curveStat, wind) {
+      aimGuideGraphics.clear();
+      aimGuideGraphics.lineStyle(2, 0xeab308, 0.8);
 
-    const mainLight = new THREE.DirectionalLight(0xfff5ea, 1.8);
-    mainLight.position.set(12, 25, 15);
-    mainLight.castShadow = true;
-    scene.add(mainLight);
+      // Largo de la guía en base a la puntería (Mayor Accuracy = Línea más larga)
+      const guideLength = Phaser.Math.Clamp(accuracyStat * 3.5, 60, 220);
+      const dotsCount = Math.floor(guideLength / 12);
 
-    // 3. CANCHA EN 3D
-    const fieldGeo = new THREE.PlaneGeometry(28, 110);
-    const fieldMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.6 });
-    const field = new THREE.Mesh(fieldGeo, fieldMat);
-    field.rotation.x = -Math.PI / 2;
-    field.position.set(0, 0, -30);
-    field.receiveShadow = true;
-    scene.add(field);
+      let px = bx;
+      let py = by;
 
-    // 4. PORTERÍA Y NET
-    const goalWidth = 7.32;
-    const goalHeight = 2.44;
-    const goalZ = -44;
+      for (let i = 0; i < dotsCount; i++) {
+        const step = i / dotsCount;
+        // La proyección de la guía simula la curva y el viento
+        const curveFactor = (curveStat / 50) * (step * step) * 20;
+        const windFactor = wind * step * 8;
 
-    const postMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.2 });
-    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, goalWidth, 16), postMat);
-    crossbar.rotation.z = Math.PI / 2;
-    crossbar.position.set(0, goalHeight, goalZ);
-    scene.add(crossbar);
+        const nextX = bx + Math.cos(angle) * (step * guideLength) + curveFactor + windFactor;
+        const nextY = by + Math.sin(angle) * (step * guideLength);
 
-    const postL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, goalHeight, 16), postMat);
-    postL.position.set(-goalWidth / 2, goalHeight / 2, goalZ);
-    scene.add(postL);
+        aimGuideGraphics.fillCircle(nextX, nextY, 2.5);
+      }
+    }
 
-    const postR = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, goalHeight, 16), postMat);
-    postR.position.set(goalWidth / 2, goalHeight / 2, goalZ);
-    scene.add(postR);
+    function spawnDefendersWall(scene, levelNum, width, height) {
+      wallGroup.forEach(d => d.destroy());
+      wallGroup = [];
 
-    // 5. JUGADOR HUMANOIDE (Prom '07)
-    const playerGroup = new THREE.Group();
-    const kitMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.7 });
+      if (levelNum === 1) return;
 
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.7, 16), kitMat);
-    torso.position.y = 1.05;
-    playerGroup.add(torso);
+      const count = levelNum === 2 ? 2 : levelNum === 3 ? 3 : 4;
+      const wallY = height * 0.52;
+      const startX = width / 2 - ((count - 1) * 22) / 2;
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), skinMat);
-    head.position.y = 1.58;
-    playerGroup.add(head);
+      for (let i = 0; i < count; i++) {
+        const defender = scene.add.container(startX + i * 22, wallY);
+        const dBody = scene.add.rectangle(0, 0, 16, 32, 0x0f172a);
+        const dStripe = scene.add.rectangle(0, -8, 16, 4, 0xeab308);
+        const dHead = scene.add.circle(0, -18, 6, 0xfbd23c);
+        defender.add([dBody, dStripe, dHead]);
+        wallGroup.push(defender);
+      }
+    }
 
-    playerGroup.position.set(0, 0, 6);
-    scene.add(playerGroup);
+    function executeShot(scene, dx, dy, width, height, bx, by) {
+      isShooting = true;
+      sfx.playKick();
 
-    // BALÓN 3D
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
-    );
-    ball.position.set(0, 0.22, 6.7);
-    scene.add(ball);
+      // Cálculo de Curva y Potencia en base a Stats
+      const powerFactor = (playerPower / 100) + 1;
+      const curveFactor = (playerCurve / 30);
 
-    sfx.playWhistle();
+      // Posición final objetivo
+      let targetX = bx + dx * powerFactor + (curveFactor * 25) + (windSpeed * 8);
+      let targetY = goalY + goalHeight / 2;
 
-    // 6. GAME LOOP
-    let animFrameId;
+      // Reacción de Orsini
+      scene.tweens.add({
+        targets: keeper,
+        x: Phaser.Math.Clamp(targetX, goalX + 20, goalX + goalWidth - 20),
+        duration: 380,
+        ease: 'Power1.out'
+      });
 
-    const animate = () => {
-      animFrameId = requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    };
+      // Animación curva del balón en Bézier
+      const controlX = bx + (dx / 2) + (curveFactor * 40);
+      const controlY = by - (Math.abs(dy) / 2);
 
-    animate();
+      let progress = 0;
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
+      scene.tweens.add({
+        targets: { t: 0 },
+        t: 1,
+        duration: 450,
+        ease: 'Power1.out',
+        onUpdate: (tween, target) => {
+          progress = target.t;
+          const px = Phaser.Math.Interpolation.QuadraticBezier(progress, bx, controlX, targetX);
+          const py = Phaser.Math.Interpolation.QuadraticBezier(progress, by, controlY, targetY);
 
-    window.addEventListener('resize', handleResize);
+          ball.setPosition(px, py);
+          ball.setScale(1 - progress * 0.4);
+
+          // Impacto en barrera
+          wallGroup.forEach(d => {
+            if (Math.abs(px - d.x) < 15 && Math.abs(py - d.y) < 18) {
+              tween.stop();
+              sfx.playHit();
+              handleLifeLoss('¡PEGÓ EN LA BARRERA!');
+            }
+          });
+        },
+        onComplete: () => {
+          evalShot(scene, targetX, targetY, width, height);
+        }
+      });
+    }
+
+    function evalShot(scene, tx, ty, width, height) {
+      const saved = Math.abs(tx - keeper.x) < 22;
+
+      if (saved) {
+        sfx.playHit();
+        handleLifeLoss('¡TAPÓ ORSINI!');
+      } else if (tx >= goalX && tx <= goalX + goalWidth) {
+        sfx.playGoal();
+        currentScore += 200;
+        setScore(currentScore);
+        triggerFeedback('¡GOOOLAZO!');
+        resetRound(scene, width, height);
+      } else {
+        sfx.playHit();
+        handleLifeLoss('¡DESVIADO!');
+      }
+    }
+
+    function handleLifeLoss(msg) {
+      currentLives -= 1;
+      setLives(currentLives);
+      triggerFeedback(msg);
+
+      if (currentLives <= 0) {
+        sfx.playWhistle();
+        triggerGameOver('¡SIN VIDAS!');
+      } else {
+        resetRound(gameRef.current.scene.scenes[0], window.innerWidth, window.innerHeight);
+      }
+    }
+
+    function resetRound(scene, width, height) {
+      setTimeout(() => {
+        if (isGameOver) return;
+        isShooting = false;
+        ball.setPosition(width / 2, height - 120);
+        ball.setScale(1);
+        keeper.setPosition(width / 2, goalY + goalHeight - 14);
+        windSpeed = Math.floor(Math.random() * 7) - 3;
+      }, 700);
+    }
+
+    function triggerFeedback(txt) {
+      setFeedback(txt);
+      setTimeout(() => setFeedback(''), 800);
+    }
+
+    function triggerGameOver(reason) {
+      isGameOver = true;
+      const expGained = Math.floor(currentScore / 10);
+      setGameOverData({ reason, score: currentScore, expGained });
+    }
+
+    function updateScene() {}
 
     return () => {
-      cancelAnimationFrame(animFrameId);
-      window.removeEventListener('resize', handleResize);
-      if (container && renderer.domElement) {
-        container.removeChild(renderer.domElement);
+      if (gameRef.current) {
+        gameRef.current.destroy(true);
       }
     };
   }, [player]);
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      width: '100vw',
-      height: '100vh',
-      backgroundColor: '#060913',
-      overflow: 'hidden',
-      touchAction: 'none'
-    }}>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', touchAction: 'none' }}>
       {/* HUD SUPERIOR */}
       <div style={{
         position: 'fixed',
@@ -193,8 +376,129 @@ export default function GameCanvas({ player, onExit }) {
         </div>
       </div>
 
-      {/* CONTENEDOR 3D ROBUSTO */}
-      <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+      {/* BOTONES DE POWER-UPS PROM '07 */}
+      <div style={{
+        position: 'fixed',
+        bottom: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        gap: '10px',
+        zIndex: 999999
+      }}>
+        <button
+          onClick={() => setActiveItem('BANANA')}
+          style={{
+            backgroundColor: activeItem === 'BANANA' ? '#eab308' : '#1e293b',
+            color: activeItem === 'BANANA' ? '#0f172a' : '#eab308',
+            border: '1px solid #eab308',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            fontSize: '10px',
+            fontWeight: 'bold',
+            fontFamily: "'Chakra Petch', sans-serif"
+          }}
+        >
+          🍌 BANANAZO
+        </button>
+
+        <button
+          onClick={() => setActiveItem('THUNDER')}
+          style={{
+            backgroundColor: activeItem === 'THUNDER' ? '#3b82f6' : '#1e293b',
+            color: activeItem === 'THUNDER' ? '#ffffff' : '#3b82f6',
+            border: '1px solid #3b82f6',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            fontSize: '10px',
+            fontWeight: 'bold',
+            fontFamily: "'Chakra Petch', sans-serif"
+          }}
+        >
+          ⚡ TRUENO
+        </button>
+      </div>
+
+      {/* FEEDBACK */}
+      {feedback && (
+        <div style={{
+          position: 'fixed',
+          top: '38%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          fontSize: '20px',
+          fontWeight: 'bold',
+          color: '#eab308',
+          zIndex: 999999,
+          fontFamily: "'Chakra Petch', sans-serif",
+          textShadow: '0 2px 8px rgba(0,0,0,0.9)'
+        }}>
+          {feedback}
+        </div>
+      )}
+
+      {/* CANAL DE JUEGO */}
+      <div id="phaser-game-container" style={{ width: '100%', height: '100%' }} />
+
+      {/* GAMEOVER MODAL */}
+      {gameOverData && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(10, 15, 29, 0.96)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          zIndex: 999999,
+          fontFamily: "'Chakra Petch', sans-serif"
+        }}>
+          <h2 style={{ fontSize: '24px', color: '#ef4444', margin: '0 0 12px 0', textTransform: 'uppercase' }}>
+            {gameOverData.reason}
+          </h2>
+
+          <div style={{
+            backgroundColor: '#111827',
+            border: '1px solid #eab308',
+            borderRadius: '10px',
+            padding: '16px',
+            width: '100%',
+            maxWidth: '280px',
+            textAlign: 'center',
+            marginBottom: '20px'
+          }}>
+            <div style={{ fontSize: '11px', color: '#94a3b8' }}>PUNTAJE FINAL</div>
+            <div style={{ fontSize: '26px', fontWeight: 'bold', color: '#eab308', margin: '4px 0 12px 0' }}>
+              {gameOverData.score}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#22c55e' }}>
+              <span>EXP Ganada:</span>
+              <strong>+{gameOverData.expGained} PTS</strong>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onExit(gameOverData.expGained)}
+            style={{
+              width: '100%',
+              maxWidth: '280px',
+              backgroundColor: '#eab308',
+              color: '#0a0f1d',
+              fontWeight: '700',
+              border: 'none',
+              padding: '12px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              textTransform: 'uppercase',
+              cursor: 'pointer'
+            }}
+          >
+            GUARDAR Y MEJORAR JUGADOR
+          </button>
+        </div>
+      )}
     </div>
   );
 }
